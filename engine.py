@@ -1,6 +1,8 @@
 import os
 import sys
-import json
+import uuid
+import time
+import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -9,127 +11,140 @@ from config import (
     get_supabase,
     OUTSCRAPER_API_KEY,
     OUTSCRAPER_API_BASE,
-    create_smartlead_campaign,
     send_discord,
 )
 
-CLEANER_WEBHOOK_BASE = os.getenv("CLEANER_WEBHOOK_BASE", "http://localhost:8001")
-
-TEMPLATES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "email_templates.json")
-
-
-def _load_templates() -> dict | None:
-    if not os.path.exists(TEMPLATES_PATH):
-        print("[ENGINE] email_templates.json introuvable")
-        return None
-    with open(TEMPLATES_PATH) as f:
-        return json.load(f)
+BATCH_SIZE = 500
+TARGET_PER_NICHE = 20_000
+RETRY_DELAY = 10
 
 
-def _render_template(text: str, vars: dict) -> str:
-    for key, val in vars.items():
-        text = text.replace("{{" + key + "}}", str(val))
-    return text
+def _scrape_city(sb, niche: str, city: str, queue_id: str) -> int:
+    """Scrape one city, returns total leads inserted."""
+    print(f"[ENGINE] Scraping {niche} / {city}")
+    sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
+
+    total_inserted = 0
+    offset = 0
+
+    while True:
+        params = {
+            "query": f"{niche} {city}",
+            "limit": BATCH_SIZE,
+            "offset": offset,
+            "language": "fr",
+            "enrichment": "contacts_n_leads",
+        }
+
+        try:
+            resp = requests.get(
+                f"{OUTSCRAPER_API_BASE}/maps/search-v2",
+                params=params,
+                headers={"X-API-KEY": OUTSCRAPER_API_KEY},
+                timeout=60,
+            )
+        except requests.RequestException as e:
+            print(f"[ENGINE] Erreur réseau: {e}")
+            time.sleep(RETRY_DELAY)
+            continue
+
+        if resp.status_code == 429:
+            print(f"[ENGINE] Rate limit (429), pause {RETRY_DELAY}s")
+            time.sleep(RETRY_DELAY)
+            continue
+
+        if resp.status_code == 404:
+            print(f"[ENGINE] 404 pour {niche} {city}, ville épuisée")
+            break
+
+        if resp.status_code not in (200, 202):
+            print(f"[ENGINE] Erreur {resp.status_code}: {resp.text[:200]}")
+            time.sleep(RETRY_DELAY)
+            continue
+
+        data = resp.json()
+        items = data.get("data", [])
+        if not items:
+            print(f"[ENGINE] 0 résultats à offset {offset}, ville épuisée")
+            break
+
+        inserted = 0
+        for entry in items:
+            place_id = str(entry.get("place_id", entry.get("id", str(uuid.uuid4()))))
+            email = (entry.get("email") or entry.get("email_1") or "").lower().strip()
+            if not email:
+                continue
+
+            lead = {
+                "place_id": place_id,
+                "campaign_queue_id": queue_id,
+                "email": email,
+                "company_name": entry.get("name") or entry.get("company_name", ""),
+                "phone": entry.get("phone", ""),
+                "location": entry.get("full_address") or entry.get("location", ""),
+                "niche": niche,
+                "status": "raw",
+                "metadata": {},
+            }
+
+            try:
+                sb.table("leads").upsert(lead, on_conflict="place_id").execute()
+                inserted += 1
+            except Exception as e:
+                err = str(e).lower()
+                if "duplicate" not in err and "23505" not in err:
+                    print(f"[ENGINE] Erreur upsert {email}: {e}")
+
+        total_inserted += inserted
+        print(f"[ENGINE] +{inserted} leads (total city: {total_inserted}) à offset {offset}")
+
+        if len(items) < BATCH_SIZE:
+            print(f"[ENGINE] Moins de {BATCH_SIZE} résultats, ville épuisée")
+            break
+
+        offset += BATCH_SIZE
+
+    sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
+    print(f"[ENGINE] Ville terminée: {niche} / {city} ({total_inserted} leads)")
+    return total_inserted
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--niche", required=True, help="Niche à scraper")
+    args = parser.parse_args()
+    niche = args.niche
+
     sb = get_supabase()
 
-    result = (
+    cities = (
         sb.table("campaign_queue")
         .select("*")
+        .eq("niche", niche)
         .eq("status", "pending")
-        .limit(1)
+        .order("city")
         .execute()
     )
 
-    if not result.data:
-        print("[ENGINE] Aucune campagne pending trouvée.")
+    if not cities.data:
+        print(f"[ENGINE] Aucune campagne pending pour '{niche}'")
         return
 
-    campaign = result.data[0]
-    queue_id = campaign["id"]
-    niche = campaign["niche"]
-    city = campaign["city"]
+    total_niche = 0
 
-    print(f"[ENGINE] Campagne trouvée : {niche} / {city} (id={queue_id})")
+    for camp in cities.data:
+        if total_niche >= TARGET_PER_NICHE:
+            print(f"[ENGINE] Objectif {TARGET_PER_NICHE} atteint pour '{niche}'")
+            break
 
-    # 1. Créer la campagne Smartlead (3 variantes A/B/C)
-    templates = _load_templates()
-    smartlead_campaign_id = None
+        inserted = _scrape_city(sb, niche, camp["city"], camp["id"])
+        total_niche += inserted
+        print(f"[ENGINE] Total {niche}: {total_niche}/{TARGET_PER_NICHE}")
 
-    if templates and templates.get("variants"):
-        template_vars = {
-            "niche_target": campaign.get("niche_target") or niche,
-            "city": city,
-            "objective": campaign.get("objective", ""),
-            "timeframe": campaign.get("timeframe", ""),
-            "constraint": campaign.get("constraint_", ""),
-            "first_name": "Prénom",
-            "custom_intro": "vous contacter",
-        }
-
-        campaign_name = _render_template(
-            templates.get("campaign_name", "{{niche_target}} — {{city}}"),
-            template_vars,
-        )
-
-        variants = []
-        for variant in templates["variants"]:
-            rendered_steps = []
-            for step in variant["steps"]:
-                rendered_steps.append({
-                    "day": step["day"],
-                    "subject": _render_template(step.get("subject", ""), template_vars),
-                    "body": _render_template(step["body"], template_vars),
-                })
-            variants.append({
-                "name": variant["name"],
-                "steps": rendered_steps,
-            })
-
-        smartlead_campaign_id = create_smartlead_campaign(campaign_name, variants)
-        if smartlead_campaign_id:
-            print(f"[ENGINE] Campagne Smartlead créée (id={smartlead_campaign_id}) avec {len(variants)} variantes")
-            sb.table("campaign_queue").update({
-                "smartlead_campaign_id": smartlead_campaign_id,
-            }).eq("id", queue_id).execute()
-        else:
-            print("[ENGINE] Échec création campagne Smartlead")
-            send_discord(f"[ERREUR] Échec création Smartlead pour {niche}/{city}")
-
-    # 2. Lancer le scraping Outscraper
-    webhook_url = f"{CLEANER_WEBHOOK_BASE}/webhook/outscraper?queue_id={queue_id}"
-    params = {
-        "query": f"{niche} {city}",
-        "limit": 100,
-        "language": "fr",
-        "enrichment": "contacts_n_leads",
-        "webhook": webhook_url,
-    }
-
-    resp = requests.get(
-        f"{OUTSCRAPER_API_BASE}/maps/search-v2",
-        params=params,
-        headers={"X-API-KEY": OUTSCRAPER_API_KEY},
-        timeout=30,
+    send_discord(
+        f"[TERMINÉ] **{niche}** : {total_niche} leads scrapés sur {len(cities.data)} villes"
     )
-
-    if resp.status_code == 429:
-        print("[ENGINE] Rate limited (429). Réessaie plus tard.")
-        return
-
-    if resp.status_code not in (200, 202):
-        print(f"[ENGINE] Erreur Outscraper {resp.status_code}: {resp.text[:200]}")
-        send_discord(f"[ERREUR] Échec lancement scraping {niche}/{city} (HTTP {resp.status_code})")
-        return
-
-    # 3. Passer la campagne en scraping
-    sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
-
-    print(f"[ENGINE] Scraping lancé pour {niche} / {city}")
-    smartlead_msg = f" (Smartlead ID: {smartlead_campaign_id})" if smartlead_campaign_id else ""
-    send_discord(f"[DÉBUT] Scraping lancé pour **{niche}** à **{city}**{smartlead_msg}")
+    print(f"[ENGINE] FINI — {niche}: {total_niche} leads")
 
 
 if __name__ == "__main__":

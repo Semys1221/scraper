@@ -7,9 +7,8 @@ CREATE TABLE campaign_queue (
   timeframe TEXT,
   constraint_ TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'scraping', 'active', 'paused', 'killed')),
-  smartlead_campaign_id BIGINT,
-  true_reply_rate NUMERIC(5, 2),
+    CHECK (status IN ('pending', 'scraping', 'done')),
+  batch INTEGER DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );
