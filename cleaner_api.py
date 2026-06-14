@@ -120,6 +120,7 @@ def webhook_outscraper(request: Request):
                 "first_name": first_name,
                 "domain": domain,
                 "status": "cleaned",
+                "valid": True,
             }).eq("place_id", lead["place_id"]).execute()
             cleaned_emails.append(email)
         except Exception as e:

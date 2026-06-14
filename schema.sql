@@ -42,6 +42,7 @@ CREATE TABLE leads (
   niche TEXT,
   status TEXT NOT NULL DEFAULT 'raw'
     CHECK (status IN ('raw', 'cleaned', 'excluded', 'imported_smartlead')),
+  valid BOOLEAN DEFAULT NULL,
   metadata JSONB DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
