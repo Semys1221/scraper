@@ -87,8 +87,15 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
             continue
 
         data = resp.json()
+
+        if data.get("status") == "Pending":
+            print(f"[ENGINE] Requête en attente Outscraper, pause 5s")
+            time.sleep(5)
+            continue
+
         items = data.get("data", [])
         if not items:
+            print(f"[ENGINE] 0 résultats à offset {offset}, ville épuisée")
             break
 
         inserted = 0
