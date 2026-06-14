@@ -89,9 +89,24 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
         data = resp.json()
 
         if data.get("status") == "Pending":
-            print(f"[ENGINE] Requête en attente Outscraper, pause 5s")
-            time.sleep(5)
-            continue
+            poll_url = data.get("results_location")
+            if not poll_url:
+                print(f"[ENGINE] Requête en attente sans results_location, pause 5s")
+                time.sleep(5)
+                continue
+            print(f"[ENGINE] Requête en attente, polling {poll_url[:60]}...")
+            for _ in range(30):
+                time.sleep(3)
+                poll_resp = requests.get(poll_url, timeout=30)
+                if poll_resp.status_code != 200:
+                    continue
+                poll_data = poll_resp.json()
+                if poll_data.get("status") in ("Completed", "Success", None):
+                    data = poll_data
+                    break
+            else:
+                print(f"[ENGINE] Timeout en attente des résultats Outscraper")
+                continue
 
         items = data.get("data", [])
         if not items:
