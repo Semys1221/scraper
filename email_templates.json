@@ -1,0 +1,82 @@
+{
+  "campaign_name": "{{niche_target}} — {{city}}",
+  "variants": [
+    {
+      "name": "A",
+      "steps": [
+        {
+          "step_number": 1,
+          "day": 1,
+          "subject": "Question pour {{niche_target}}",
+          "body": "Cher {{first_name}},<br><br>Je comptais {{custom_intro}} après vous avoir trouvé sur l'annuaire de votre région, mais un email m'a semblé plus adapté.<br><br>Nous aidons les {{niche_target}} à {{objective}} en {{timeframe}} {{constraint}}.<br><br>Puis-je vous envoyer une courte vidéo du conseiller ?<br><br>Bien à vous,"
+        },
+        {
+          "step_number": 2,
+          "day": 4,
+          "subject": "",
+          "body": "Si nous pouvions vous montrer comment {{objective}} en {{timeframe}}, voudriez-vous en savoir plus ?<br><br>Bien à vous,<br><br>Caroline F."
+        }
+      ]
+    },
+    {
+      "name": "B",
+      "steps": [
+        {
+          "step_number": 1,
+          "day": 1,
+          "subject": "{{niche_target}} - {{objective}}",
+          "body": "Cher {{first_name}},<br><br>J'ai une question simple : et si vous pouviez {{objective}} en {{timeframe}} {{constraint}} ?<br><br>Je suis tombé sur votre profil en ligne et je pense que notre approche pourrait vous intéresser. Nous accompagnons justement des {{niche_target}} dans cette démarche.<br><br>5 minutes pour en discuter ?<br><br>Cordialement,"
+        },
+        {
+          "step_number": 2,
+          "day": 4,
+          "subject": "",
+          "body": "Je me demandais si mon précédent message était passé inaperçu ou si le sujet ne vous parle pas.<br><br>Si {{objective}} en {{timeframe}} vous intéresse, je reste à votre disposition.<br><br>Caroline F."
+        }
+      ]
+    },
+    {
+      "name": "C",
+      "steps": [
+        {
+          "step_number": 1,
+          "day": 1,
+          "subject": "Idée pour {{niche_target}}",
+          "body": "Cher {{first_name}},<br><br>Un confrère {{niche_target}} m'a récemment confié qu'il aurait aimé avoir cette information plus tôt : il est possible d'{{objective}} en {{timeframe}} {{constraint}}.<br><br>Je me suis dit que cela pourrait aussi vous être utile.<br><br>Puis-je vous envoyer une courte vidéo qui explique le principe ?<br><br>Bien à vous,"
+        },
+        {
+          "step_number": 2,
+          "day": 4,
+          "subject": "",
+          "body": "Peut-être que mon message est passé au mauvais moment, mais je voulais m'assurer que vous aviez vu mon précédent email.<br><br>Si {{objective}} en {{timeframe}} est un sujet qui compte pour vous, je serais ravi d'échanger.<br><br>Caroline F."
+        }
+      ]
+    }
+  ],
+  "positive_reply": [
+    {
+      "step_number": 1,
+      "day_offset": 0,
+      "subject": "",
+      "body": "Parfait, voici le lien direct vers la présentation courte (1 min) :<br><br>https://www.sylkconseils.com<br><br>Bon visionnage,<br><br>Caroline Fontrelle"
+    },
+    {
+      "step_number": 2,
+      "day_offset": 2,
+      "subject": "",
+      "body": "Un de nos clients a réduit son imposition de 40% en 3 mois.<br><br>Souhaitez-vous que je vous partage les détails ?<br><br>Caroline Fontrelle"
+    },
+    {
+      "step_number": 3,
+      "day_offset": 5,
+      "subject": "",
+      "body": "Si nous pouvions vous aider à {{objective}} en {{timeframe}}, seriez-vous intéressé ?<br><br>Caroline Fontrelle"
+    },
+    {
+      "step_number": 4,
+      "day_offset": 10,
+      "subject": "",
+      "body": "Ceci est mon dernier message. Je comprends tout à fait que cela ne fait pas partie de vos priorités pour le moment, et je respecte votre décision.<br><br>Je vous souhaite de beaux projets à venir.<br><br>Bien à vous,<br><br>Caroline Fontrelle"
+    }
+  ]
+}
