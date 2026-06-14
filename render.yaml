@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: cleaner-api
+    runtime: python
+    repo: https://github.com/Semys1221/scraper
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn cleaner_api:app --host 0.0.0.0 --port 8001
+    healthCheckPath: /health
+    plan: free
+    region: frankfurt
+    envVars:
+      - key: SUPABASE_URL
+        value: https://rwaggfdqdnfyomvgnsne.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OUTSCRAPER_API_KEY
+        sync: false
+      - key: SMARTLEAD_API_KEY
+        sync: false
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
