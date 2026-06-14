@@ -208,14 +208,15 @@ def auto_run():
             .execute()
         )
 
-        niches = sorted(set(r["niche"] for r in result.data)) if result.data else []
+        all_niches = sorted(set(r["niche"] for r in result.data)) if result.data else []
 
-        if not niches:
+        if not all_niches:
             print(f"[ENGINE] Aucune niche pending. Nouvelle vérification dans {POLL_INTERVAL}s")
             time.sleep(POLL_INTERVAL)
             continue
 
-        print(f"[ENGINE] Niches à traiter: {niches}")
+        niches = all_niches[:MAX_CONCURRENT]
+        print(f"[ENGINE] Niches à traiter: {niches} (sur {len(all_niches)} en attente)")
 
         with ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
             futures = {executor.submit(_scrape_niche, n): n for n in niches}
