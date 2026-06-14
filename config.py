@@ -53,7 +53,7 @@ def create_smartlead_campaign(name: str, variants: list[dict]) -> int | None:
         return None
 
     resp = requests.post(
-        f"{SMARTLEAD_API_BASE}/campaigns",
+        f"{SMARTLEAD_API_BASE}/campaigns/create",
         params={"api_key": SMARTLEAD_API_KEY},
         json={"name": name},
         timeout=15,

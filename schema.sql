@@ -9,6 +9,7 @@ CREATE TABLE campaign_queue (
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'scraping', 'done')),
   batch INTEGER DEFAULT 1,
+  smartlead_campaign_id BIGINT,
   include_keywords TEXT,
   exclude_keywords TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
