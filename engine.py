@@ -198,6 +198,9 @@ def auto_run():
 
     while True:
         sb = get_supabase()
+
+        sb.table("campaign_queue").update({"status": "pending"}).eq("status", "scraping").execute()
+
         result = (
             sb.table("campaign_queue")
             .select("niche")
