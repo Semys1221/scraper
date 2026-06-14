@@ -1,12 +1,12 @@
 services:
   - type: web
-    name: cleaner-api
+    name: engine
     runtime: python
     repo: https://github.com/Semys1221/scraper
     branch: main
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m uvicorn cleaner_api:app --host 0.0.0.0 --port 8001
-    healthCheckPath: /health
+    startCommand: python main.py
+    healthCheckPath: /
     plan: free
     region: frankfurt
     envVars:
