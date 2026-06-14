@@ -109,6 +109,8 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
                 continue
 
         items = data.get("data", [])
+        if items and isinstance(items, list) and len(items) > 0 and isinstance(items[0], list):
+            items = items[0]
         if not items:
             print(f"[ENGINE] 0 résultats à offset {offset}, ville épuisée")
             break
