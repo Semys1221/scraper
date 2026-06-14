@@ -7,7 +7,29 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     healthCheckPath: /
-    plan: free
+    plan: starter
+    region: frankfurt
+    envVars:
+      - key: SUPABASE_URL
+        value: https://rwaggfdqdnfyomvgnsne.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OUTSCRAPER_API_KEY
+        sync: false
+      - key: SMARTLEAD_API_KEY
+        sync: false
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
+
+  - type: web
+    name: cleaner
+    runtime: python
+    repo: https://github.com/Semys1221/scraper
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python cleaner.py
+    healthCheckPath: /health
+    plan: starter
     region: frankfurt
     envVars:
       - key: SUPABASE_URL
