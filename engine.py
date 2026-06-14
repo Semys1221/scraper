@@ -19,12 +19,47 @@ TARGET_PER_NICHE = 20_000
 RETRY_DELAY = 10
 
 
-def _scrape_city(sb, niche: str, city: str, queue_id: str) -> int:
-    """Scrape one city, returns total leads inserted."""
+def _parse_keywords(text: str | None) -> list[str]:
+    if not text:
+        return []
+    return [kw.strip().lower() for kw in text.split(",") if kw.strip()]
+
+
+def _matches_keywords(
+    company_name: str,
+    email: str,
+    include: list[str],
+    exclude: list[str],
+) -> bool:
+    if not include and not exclude:
+        return True
+
+    text = f"{company_name} {email}".lower()
+
+    if include:
+        if not any(kw in text for kw in include):
+            return False
+
+    if exclude:
+        if any(kw in text for kw in exclude):
+            return False
+
+    return True
+
+
+def _scrape_city(
+    sb,
+    niche: str,
+    city: str,
+    queue_id: str,
+    include_kw: list[str],
+    exclude_kw: list[str],
+) -> int:
     print(f"[ENGINE] Scraping {niche} / {city}")
     sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
 
     total_inserted = 0
+    total_filtered = 0
     offset = 0
 
     while True:
@@ -69,17 +104,25 @@ def _scrape_city(sb, niche: str, city: str, queue_id: str) -> int:
             break
 
         inserted = 0
+        filtered = 0
+
         for entry in items:
             place_id = str(entry.get("place_id", entry.get("id", str(uuid.uuid4()))))
             email = (entry.get("email") or entry.get("email_1") or "").lower().strip()
             if not email:
                 continue
 
+            company_name = entry.get("name") or entry.get("company_name", "") or ""
+
+            if not _matches_keywords(company_name, email, include_kw, exclude_kw):
+                filtered += 1
+                continue
+
             lead = {
                 "place_id": place_id,
                 "campaign_queue_id": queue_id,
                 "email": email,
-                "company_name": entry.get("name") or entry.get("company_name", ""),
+                "company_name": company_name,
                 "phone": entry.get("phone", ""),
                 "location": entry.get("full_address") or entry.get("location", ""),
                 "niche": niche,
@@ -96,13 +139,17 @@ def _scrape_city(sb, niche: str, city: str, queue_id: str) -> int:
                     print(f"[ENGINE] Erreur upsert {email}: {e}")
 
         total_inserted += inserted
-        print(f"[ENGINE] +{inserted} leads (total city: {total_inserted}) à offset {offset}")
+        total_filtered += filtered
+        print(f"[ENGINE] +{inserted} leads (+{filtered} filtrés, total city: {total_inserted}) à offset {offset}")
 
         if len(items) < BATCH_SIZE:
             print(f"[ENGINE] Moins de {BATCH_SIZE} résultats, ville épuisée")
             break
 
         offset += BATCH_SIZE
+
+    if total_filtered > 0:
+        print(f"[ENGINE] {total_filtered} leads filtrés par mots-clés sur {niche} / {city}")
 
     sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
     print(f"[ENGINE] Ville terminée: {niche} / {city} ({total_inserted} leads)")
@@ -130,6 +177,12 @@ def main():
         print(f"[ENGINE] Aucune campagne pending pour '{niche}'")
         return
 
+    include_kw = _parse_keywords(cities.data[0].get("include_keywords"))
+    exclude_kw = _parse_keywords(cities.data[0].get("exclude_keywords"))
+
+    if include_kw or exclude_kw:
+        print(f"[ENGINE] Filtres: include={include_kw}, exclude={exclude_kw}")
+
     total_niche = 0
 
     for camp in cities.data:
@@ -137,7 +190,7 @@ def main():
             print(f"[ENGINE] Objectif {TARGET_PER_NICHE} atteint pour '{niche}'")
             break
 
-        inserted = _scrape_city(sb, niche, camp["city"], camp["id"])
+        inserted = _scrape_city(sb, niche, camp["city"], camp["id"], include_kw, exclude_kw)
         total_niche += inserted
         print(f"[ENGINE] Total {niche}: {total_niche}/{TARGET_PER_NICHE}")
 
