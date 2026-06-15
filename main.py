@@ -389,7 +389,8 @@ class Handler(BaseHTTPRequestHandler):
             camps_scraping = sum(1 for c in camps.data if c["status"] == "scraping")
             camps_pending = sum(1 for c in camps.data if c["status"] == "pending")
 
-            leads = sb.table("leads").select("status, niche").execute()
+            leads = sb.table("leads").select("status, niche").range(0, 100000).execute()
+
             leads_raw = sum(1 for l in leads.data if l["status"] == "raw")
             leads_cleaned = sum(1 for l in leads.data if l["status"] == "cleaned")
             leads_smartlead = sum(1 for l in leads.data if l["status"] == "imported_smartlead")
@@ -397,7 +398,9 @@ class Handler(BaseHTTPRequestHandler):
             niche_map = {}
             for l in leads.data:
                 n = l.get("niche", "inconnu")
-                niche_map[n] = niche_map.get(n, 0) + 1
+                if n not in niche_map:
+                    niche_map[n] = 0
+                niche_map[n] += 1
             by_niche = [{"niche": k, "total": v} for k, v in sorted(niche_map.items())]
 
             self._json({
