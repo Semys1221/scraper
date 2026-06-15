@@ -97,6 +97,7 @@ def _process_batch(sb):
         if is_valid:
             lead["custom_fields"] = {
                 "phone": lead.get("phone", ""),
+                "city": lead.get("city", ""),
                 "custom_intro": "vous contacter",
             }
             cleaned_valid.append(lead)

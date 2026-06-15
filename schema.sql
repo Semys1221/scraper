@@ -42,6 +42,7 @@ CREATE TABLE leads (
   phone TEXT,
   location TEXT,
   niche TEXT,
+  city TEXT,
   status TEXT NOT NULL DEFAULT 'raw'
     CHECK (status IN ('raw', 'cleaned', 'excluded', 'imported_smartlead')),
   valid BOOLEAN DEFAULT NULL,

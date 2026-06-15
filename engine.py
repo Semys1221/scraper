@@ -134,6 +134,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
                 "phone": entry.get("phone", ""),
                 "location": entry.get("full_address") or entry.get("location", ""),
                 "niche": niche,
+                "city": city,
                 "status": "raw",
                 "metadata": {},
             }
