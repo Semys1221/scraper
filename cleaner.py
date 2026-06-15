@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-import smtplib
 import logging
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -16,8 +15,6 @@ log = logging.getLogger(__name__)
 
 BATCH_SIZE = 50
 POLL_INTERVAL = 30
-MAIL_FROM = "hello@montismedia.com"
-SMTP_TIMEOUT = 10
 GENERIC_PREFIXES = {
     "contact", "info", "hello", "bonjour", "team", "mail",
     "admin", "support", "sales", "help", "noreply", "no-reply",
@@ -40,24 +37,11 @@ def _is_generic(email: str) -> bool:
     return local in GENERIC_PREFIXES or not local
 
 
-def _check_mx(domain: str) -> list[str] | None:
+def _has_mx(domain: str) -> bool:
     try:
-        answers = dns.resolver.resolve(domain, "MX", lifetime=SMTP_TIMEOUT)
-        mx_records = sorted(answers, key=lambda r: r.preference)
-        return [str(r.exchange) for r in mx_records]
+        answers = dns.resolver.resolve(domain, "MX", lifetime=10)
+        return len(answers) > 0
     except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.Timeout, dns.exception.DNSException):
-        return None
-
-
-def _smtp_verify(mx_host: str, email: str) -> bool:
-    try:
-        with smtplib.SMTP(mx_host, timeout=SMTP_TIMEOUT) as smtp:
-            smtp.set_debuglevel(0)
-            smtp.ehlo_or_helo_if_needed()
-            smtp.mail(MAIL_FROM)
-            code, _ = smtp.rcpt(email)
-            return code == 250
-    except (smtplib.SMTPException, OSError, ConnectionRefusedError, TimeoutError):
         return False
 
 
@@ -65,16 +49,7 @@ def _verify_email(email: str) -> bool:
     domain = email.split("@")[1] if "@" in email else ""
     if not domain:
         return False
-
-    mx_list = _check_mx(domain)
-    if not mx_list:
-        return False
-
-    for mx_host in mx_list[:3]:
-        if _smtp_verify(mx_host, email):
-            return True
-
-    return False
+    return _has_mx(domain)
 
 
 def _process_batch(sb):
