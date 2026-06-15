@@ -55,7 +55,7 @@ def _verify_email(email: str) -> bool:
 def _process_batch(sb):
     raw = (
         sb.table("leads")
-        .select("id, place_id, email, phone, first_name, campaign_queue_id")
+        .select("id, place_id, email, phone, first_name, campaign_queue_id, niche")
         .eq("status", "raw")
         .limit(BATCH_SIZE)
         .execute()
@@ -96,6 +96,9 @@ def _process_batch(sb):
 
         if is_valid:
             lead["custom_fields"] = {
+                "lead_id": lead.get("id", ""),
+                "lead_first_name": lead.get("first_name", ""),
+                "lead_niche": lead.get("niche", ""),
                 "phone": lead.get("phone", ""),
                 "city": lead.get("city", ""),
                 "custom_intro": "vous contacter",

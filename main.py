@@ -375,15 +375,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_tracking(self, link_type):
         parts = self.path.split("/")
-        if len(parts) < 3 or not parts[2]:
-            self.send_response(400)
-            self.end_headers()
-            return
+        lead_id = parts[2] if len(parts) >= 3 else ""
 
         redirect_url = "https://calendly.com/syli-conseils/30min" if link_type == "book" else "https://sylkconseils.com"
-        label = "booking" if link_type == "book" else "temoignage"
-        title = "Planifier un RDV" if link_type == "book" else "Temoignage"
+        action = "réservation" if link_type == "book" else "témoignage"
+        title = "Planifier un RDV" if link_type == "book" else "Témoignage"
         webhook = os.getenv("DISCORD_WEBHOOK_URL", "")
+
+        first_name = ""
+        niche = ""
+        email = ""
+
+        if lead_id:
+            try:
+                sb = get_supabase()
+                lead = sb.table("leads").select("first_name, email, niche").eq("id", lead_id).single().execute().data
+                if lead:
+                    first_name = lead.get("first_name", "") or ""
+                    niche = lead.get("niche", "") or ""
+                    email = lead.get("email", "") or ""
+            except Exception:
+                pass
+
+        parts_list = [p for p in [first_name, niche, email, action] if p]
+        discord_msg = " ".join(parts_list)
 
         self._serve_html(f"""<!DOCTYPE html>
 <html lang="fr">
@@ -401,7 +416,7 @@ h1{{font-size:24px;font-weight:400}}
 <script>
 fetch('{webhook}',{{
   method:'POST',
-  body:JSON.stringify({{content:'[TRACKING] Lead a clique sur le lien {label}'}}),
+  body:JSON.stringify({{content:'{discord_msg}'}}),
   headers:{{'Content-Type':'application/json'}}
 }}).catch(function(){{}});
 window.location.href='{redirect_url}';
