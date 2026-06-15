@@ -20,6 +20,8 @@ services:
         sync: false
       - key: DISCORD_WEBHOOK_URL
         sync: false
+      - key: GEMINI_API_KEY
+        sync: false
 
   - type: web
     name: cleaner
@@ -41,4 +43,6 @@ services:
       - key: SMARTLEAD_API_KEY
         sync: false
       - key: DISCORD_WEBHOOK_URL
+        sync: false
+      - key: GEMINI_API_KEY
         sync: false

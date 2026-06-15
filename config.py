@@ -27,6 +27,7 @@ SMARTLEAD_API_KEY = os.getenv("SMARTLEAD_API_KEY", "")
 SMARTLEAD_API_BASE = "https://server.smartlead.ai/api/v1"
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 OUTSCRAPER_API_BASE = "https://api.app.outscraper.com"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 
 def get_supabase():
@@ -133,6 +134,28 @@ def get_smartlead_analytics(campaign_id: int) -> dict:
     if resp.status_code == 200:
         return resp.json()
     return {}
+
+
+def update_smartlead_sequences(campaign_id: int, variants: list[dict]) -> bool:
+    if not SMARTLEAD_API_KEY:
+        return False
+    sequences = [
+        {
+            "name": f"Variante {v.get('name', '')}",
+            "steps": [
+                {"day": s["day"], "subject": s.get("subject", ""), "body": s["body"]}
+                for s in v["steps"]
+            ],
+        }
+        for v in variants
+    ]
+    resp = requests.post(
+        f"{SMARTLEAD_API_BASE}/campaigns/{campaign_id}/sequences",
+        params={"api_key": SMARTLEAD_API_KEY},
+        json={"sequences": sequences},
+        timeout=15,
+    )
+    return resp.status_code == 200
 
 
 def pause_smartlead_campaign(campaign_id: int) -> bool:

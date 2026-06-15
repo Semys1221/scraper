@@ -120,6 +120,10 @@ def _process_batch(sb):
         sb.table("leads").update(update).eq("place_id", place_id).execute()
 
         if is_valid:
+            lead["custom_fields"] = {
+                "phone": lead.get("phone", ""),
+                "custom_intro": "vous contacter",
+            }
             cleaned_valid.append(lead)
         else:
             cleaned_invalid += 1
