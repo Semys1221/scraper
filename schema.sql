@@ -81,7 +81,9 @@ CREATE TABLE email_sequence_cgp (
   day INTEGER,
   variant TEXT DEFAULT 'A',
   step INTEGER,
-  methode_tease TEXT
+  methode_tease TEXT,
+  pain_point TEXT,
+  objectif_alt TEXT
 );
 
 CREATE INDEX idx_email_sequence_common_niche ON email_sequence_cgp(common_niche);
