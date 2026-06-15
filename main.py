@@ -352,6 +352,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_stats()
         elif self.path == "/api/templates":
             self._handle_get_templates()
+        elif self.path.startswith("/book/"):
+            self._handle_tracking("book")
+        elif self.path.startswith("/testimonial/"):
+            self._handle_tracking("testimonial")
         elif self.path == "/health":
             self._json({"status": "ok"})
         else:
@@ -368,6 +372,42 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
+    def _handle_tracking(self, link_type):
+        parts = self.path.split("/")
+        if len(parts) < 3 or not parts[2]:
+            self.send_response(400)
+            self.end_headers()
+            return
+
+        redirect_url = "https://calendly.com/syli-conseils/30min" if link_type == "book" else "https://sylkconseils.com"
+        label = "booking" if link_type == "book" else "temoignage"
+        title = "Planifier un RDV" if link_type == "book" else "Temoignage"
+        webhook = os.getenv("DISCORD_WEBHOOK_URL", "")
+
+        self._serve_html(f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+body{{font-family:sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
+h1{{font-size:24px;font-weight:400}}
+</style>
+</head>
+<body>
+<h1>Redirection...</h1>
+<script>
+fetch('{webhook}',{{
+  method:'POST',
+  body:JSON.stringify({{content:'[TRACKING] Lead a clique sur le lien {label}'}}),
+  headers:{{'Content-Type':'application/json'}}
+}}).catch(function(){{}});
+window.location.href='{redirect_url}';
+</script>
+</body>
+</html>""")
 
     def _serve_html(self, html):
         self.send_response(200)

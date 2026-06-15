@@ -10,6 +10,7 @@ CREATE TABLE campaign_queue (
     CHECK (status IN ('pending', 'scraping', 'done')),
   batch INTEGER DEFAULT 1,
   smartlead_campaign_id BIGINT,
+  custom_intro TEXT,
   include_keywords TEXT,
   exclude_keywords TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -53,3 +54,35 @@ CREATE TABLE leads (
 
 CREATE INDEX idx_leads_status ON leads(status);
 CREATE INDEX idx_leads_campaign ON leads(campaign_queue_id);
+
+CREATE TABLE email_sequence (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  common_niche TEXT NOT NULL,
+  niche TEXT NOT NULL,
+  phone TEXT,
+  objectif TEXT,
+  benefice_delai TEXT,
+  contrainte TEXT,
+  cta TEXT,
+  signature TEXT,
+  email_sender TEXT,
+  time_in_between INTEGER,
+  email_template TEXT,
+  email_smartlead TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  pushed BOOLEAN NOT NULL DEFAULT false,
+  subject TEXT,
+  delai_promesse TEXT,
+  pourcentage_reduction TEXT,
+  booking_link TEXT,
+  testimonial_link TEXT,
+  tracking_webhook TEXT,
+  greeting TEXT,
+  day INTEGER,
+  variant TEXT DEFAULT 'A',
+  step INTEGER
+);
+
+CREATE INDEX idx_email_sequence_common_niche ON email_sequence(common_niche);
+CREATE INDEX idx_email_sequence_niche ON email_sequence(niche);
