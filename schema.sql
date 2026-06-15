@@ -55,14 +55,13 @@ CREATE TABLE leads (
 CREATE INDEX idx_leads_status ON leads(status);
 CREATE INDEX idx_leads_campaign ON leads(campaign_queue_id);
 
-CREATE TABLE email_sequence (
+CREATE TABLE email_sequence_cgp (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   common_niche TEXT NOT NULL,
   niche TEXT NOT NULL,
   phone TEXT,
   objectif TEXT,
   benefice_delai TEXT,
-  contrainte TEXT,
   cta TEXT,
   signature TEXT,
   email_sender TEXT,
@@ -81,8 +80,9 @@ CREATE TABLE email_sequence (
   greeting TEXT,
   day INTEGER,
   variant TEXT DEFAULT 'A',
-  step INTEGER
+  step INTEGER,
+  methode_tease TEXT
 );
 
-CREATE INDEX idx_email_sequence_common_niche ON email_sequence(common_niche);
-CREATE INDEX idx_email_sequence_niche ON email_sequence(niche);
+CREATE INDEX idx_email_sequence_common_niche ON email_sequence_cgp(common_niche);
+CREATE INDEX idx_email_sequence_niche ON email_sequence_cgp(niche);
