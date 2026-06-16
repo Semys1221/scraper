@@ -24,6 +24,8 @@ services:
         sync: false
       - key: CALENDLY_URL
         sync: false
+      - key: TESTIMONIAL_URL
+        sync: false
 
   - type: web
     name: cleaner

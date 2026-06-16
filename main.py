@@ -375,7 +375,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def _handle_tracking(self, link_type):
-        redirect_url = os.getenv("CALENDLY_URL", "https://calendly.com/syli-conseils/30min") if link_type == "book" else "https://sylkconseils.com"
+        redirect_url = os.getenv("CALENDLY_URL", "https://calendly.com/syli-conseils/30min") if link_type == "book" else os.getenv("TESTIMONIAL_URL", "https://sylkconseils.com")
         action = "réservation" if link_type == "book" else "témoignage"
         title = "Planifier un RDV" if link_type == "book" else "Témoignage"
         webhook = os.getenv("DISCORD_WEBHOOK_URL", "")
