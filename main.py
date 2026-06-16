@@ -615,10 +615,12 @@ window.location.href='{redirect_url}';
 
 
 def _cleaner_keep_alive():
-    url = "https://cleaner-4tau.onrender.com/health"
+    engine_url = f"https://engine-20m5.onrender.com/"
+    cleaner_url = "https://cleaner-4tau.onrender.com/health"
     while True:
         try:
-            requests.get(url, timeout=10)
+            requests.get(engine_url, timeout=10)
+            requests.get(cleaner_url, timeout=10)
         except Exception:
             pass
         time.sleep(600)  # 10 minutes
