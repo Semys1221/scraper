@@ -16,6 +16,8 @@ from config import (
 ) 
 
 BATCH_SIZE = 100
+LOG_FREQUENCY = 50  # log progress every N leads
+MILESTONES = [100, 500, 1000, 2000, 5000]
 TARGET_PER_NICHE = 20_000
 TARGET_CYCLE = 2000
 TARGET_MAX = 6000
@@ -44,7 +46,7 @@ def _matches_keywords(company_name: str, email: str, include: list[str], exclude
 
 
 def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
-    print(f"[ENGINE] Scraping {niche} / {city}")
+    print(f"[ENGINE] ▶ Scraping {niche} / {city}")
     sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
 
     total_inserted = 0
@@ -68,12 +70,12 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
                 timeout=60,
             )
         except requests.RequestException as e:
-            print(f"[ENGINE] Erreur réseau: {e}")
+            print(f"[ENGINE] ⚠ Réseau: {e}")
             time.sleep(RETRY_DELAY)
             continue
 
         if resp.status_code == 429:
-            print(f"[ENGINE] Rate limit (429), pause {RETRY_DELAY}s")
+            print(f"[ENGINE] ⏳ Rate limit (429), pause {RETRY_DELAY}s")
             time.sleep(RETRY_DELAY)
             continue
 
@@ -81,7 +83,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
             break
 
         if resp.status_code not in (200, 202):
-            print(f"[ENGINE] Erreur {resp.status_code}: {resp.text[:200]}")
+            print(f"[ENGINE] ⚠ Erreur {resp.status_code}: {resp.text[:200]}")
             time.sleep(RETRY_DELAY)
             continue
 
@@ -90,7 +92,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
         if data.get("status") == "Pending":
             poll_url = data.get("results_location")
             if not poll_url:
-                print(f"[ENGINE] Requête en attente sans results_location, pause 5s")
+                print(f"[ENGINE] ⏳ Requête en attente sans results_location, pause 5s")
                 time.sleep(5)
                 continue
             print(f"[ENGINE] Requête en attente, polling...")
@@ -146,17 +148,32 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
             except Exception as e:
                 err = str(e).lower()
                 if "duplicate" not in err and "23505" not in err:
-                    print(f"[ENGINE] Erreur upsert {email}: {e}")
+                    print(f"[ENGINE] ⚠ Erreur upsert {email}: {e}")
 
         total_inserted += inserted
-        print(f"[ENGINE] +{inserted} leads (total: {total_inserted}) à skip {skip}")
+        new_total = total_inserted  # city-level total
+
+        # Granular logging every LOG_FREQUENCY leads
+        if inserted > 0:
+            prev = new_total - inserted
+            prev_mod = (prev // LOG_FREQUENCY) * LOG_FREQUENCY
+            new_mod = (new_total // LOG_FREQUENCY) * LOG_FREQUENCY
+            if new_mod > prev_mod:
+                print(f"[ENGINE] 📊 {niche}/{city}: {new_total} leads ({total_filtered} filtrés)")
+
+        # Milestone alerts
+        for m in MILESTONES:
+            if prev < m <= new_total:
+                send_discord(f"[MILESTONE] **{niche}/{city}** : {m} leads !")
+
+        print(f"[ENGINE]   batch +{inserted} → {total_inserted} leads ({niche}/{city})")
 
         if len(items) < BATCH_SIZE:
             break
         skip += BATCH_SIZE
 
     sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-    print(f"[ENGINE] {niche} / {city} terminée ({total_inserted} leads, {total_filtered} filtrés)")
+    print(f"[ENGINE] ✅ {niche} / {city} terminée ({total_inserted} leads, {total_filtered} filtrés)")
     return total_inserted
 
 
@@ -173,7 +190,7 @@ def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
     )
 
     if not cities.data:
-        print(f"[ENGINE] Aucune campagne pending pour '{niche}'")
+        print(f"[ENGINE] ⏭ Aucune campagne pending pour '{niche}'")
         return 0
 
     include_kw = _parse_keywords(cities.data[0].get("include_keywords"))
@@ -183,13 +200,16 @@ def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
         print(f"[ENGINE] Filtres {niche}: include={include_kw}, exclude={exclude_kw}")
 
     total = 0
-    for camp in cities.data:
+    nb_cities = len(cities.data)
+    print(f"[ENGINE] 🏁 {niche}: {nb_cities} villes à traiter, target {target} leads")
+
+    for idx, camp in enumerate(cities.data, 1):
         if total >= target:
-            print(f"[ENGINE] Objectif {target} atteint pour '{niche}'")
+            print(f"[ENGINE] 🎯 Objectif {target} atteint pour '{niche}' après {idx-1}/{nb_cities} villes")
             break
         inserted = _scrape_city(sb, niche, camp["city"], camp["id"], include_kw, exclude_kw)
         total += inserted
-        print(f"[ENGINE] Total {niche}: {total}/{target}")
+        print(f"[ENGINE] 📈 {niche}: {total}/{target} leads ({idx}/{nb_cities} villes)")
 
     if total > 0:
         send_discord(f"[TERMINÉ] **{niche}** : {total} leads scrapés")
