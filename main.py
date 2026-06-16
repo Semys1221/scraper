@@ -3,6 +3,7 @@ import sys
 import threading
 import json
 import urllib.parse
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -352,9 +353,9 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_stats()
         elif self.path == "/api/templates":
             self._handle_get_templates()
-        elif self.path.startswith("/book/"):
+        elif self.path == "/book":
             self._handle_tracking("book")
-        elif self.path.startswith("/testimonial/"):
+        elif self.path == "/testimonial":
             self._handle_tracking("testimonial")
         elif self.path == "/health":
             self._json({"status": "ok"})
@@ -374,31 +375,13 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def _handle_tracking(self, link_type):
-        parts = self.path.split("/")
-        lead_id = parts[2] if len(parts) >= 3 else ""
-
         redirect_url = "https://calendly.com/syli-conseils/30min" if link_type == "book" else "https://sylkconseils.com"
         action = "réservation" if link_type == "book" else "témoignage"
         title = "Planifier un RDV" if link_type == "book" else "Témoignage"
         webhook = os.getenv("DISCORD_WEBHOOK_URL", "")
 
-        first_name = ""
-        niche = ""
-        email = ""
-
-        if lead_id:
-            try:
-                sb = get_supabase()
-                lead = sb.table("leads").select("first_name, email, niche").eq("id", lead_id).single().execute().data
-                if lead:
-                    first_name = lead.get("first_name", "") or ""
-                    niche = lead.get("niche", "") or ""
-                    email = lead.get("email", "") or ""
-            except Exception:
-                pass
-
-        parts_list = [p for p in [first_name, niche, email, action] if p]
-        discord_msg = " ".join(parts_list)
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         self._serve_html(f"""<!DOCTYPE html>
 <html lang="fr">
@@ -416,7 +399,7 @@ h1{{font-size:24px;font-weight:400}}
 <script>
 fetch('{webhook}',{{
   method:'POST',
-  body:JSON.stringify({{content:'{discord_msg}'}}),
+  body:JSON.stringify({{content:'[{action}] Clic tracking — {timestamp}'}}),
   headers:{{'Content-Type':'application/json'}}
 }}).catch(function(){{}});
 window.location.href='{redirect_url}';
@@ -631,6 +614,16 @@ window.location.href='{redirect_url}';
         pass
 
 
+def _cleaner_keep_alive():
+    url = "https://cleaner-4tau.onrender.com/health"
+    while True:
+        try:
+            requests.get(url, timeout=10)
+        except Exception:
+            pass
+        time.sleep(600)  # 10 minutes
+
+
 def start_http():
     server = HTTPServer(("0.0.0.0", PORT), Handler)
     print(f"[MAIN] Server on port {PORT}")
@@ -638,6 +631,7 @@ def start_http():
 
 
 if __name__ == "__main__":
+    threading.Thread(target=_cleaner_keep_alive, daemon=True).start()
     t = threading.Thread(target=start_http, daemon=True)
     t.start()
     auto_run()
