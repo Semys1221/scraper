@@ -397,11 +397,8 @@ h1{{font-size:24px;font-weight:400}}
 <body>
 <h1>Redirection...</h1>
 <script>
-fetch('{webhook}',{{
-  method:'POST',
-  body:JSON.stringify({{content:'[{action}] Clic tracking — {timestamp}'}}),
-  headers:{{'Content-Type':'application/json'}}
-}}).catch(function(){{}});
+var msg = JSON.stringify({{content:'[{action}] Clic tracking — {timestamp}'}});
+navigator.sendBeacon('{webhook}', msg);
 window.location.href='{redirect_url}';
 </script>
 </body>
