@@ -381,8 +381,9 @@ class Handler(BaseHTTPRequestHandler):
         webhook = os.getenv("DISCORD_WEBHOOK_URL", "")
 
         import datetime
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        discord_msg = f"[{action}] Clic tracking — {timestamp}"
+        now = datetime.datetime.now()
+        date_fr = now.strftime("%d/%m/%Y à %Hh%M").lstrip("0")
+        discord_msg = f"[{action}] Nouveau clic — {date_fr}"
 
         self._serve_html(f"""<!DOCTYPE html>
 <html lang="fr">
