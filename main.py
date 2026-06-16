@@ -382,6 +382,7 @@ class Handler(BaseHTTPRequestHandler):
 
         import datetime
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        discord_msg = f"[{action}] Clic tracking — {timestamp}"
 
         self._serve_html(f"""<!DOCTYPE html>
 <html lang="fr">
@@ -397,8 +398,8 @@ h1{{font-size:24px;font-weight:400}}
 <body>
 <h1>Redirection...</h1>
 <script>
-var msg = JSON.stringify({{content:'[{action}] Clic tracking — {timestamp}'}});
-navigator.sendBeacon('{webhook}', msg);
+var b = new Blob([JSON.stringify({{content:'{discord_msg}'}})], {{type:'application/json'}});
+navigator.sendBeacon('{webhook}', b);
 window.location.href='{redirect_url}';
 </script>
 </body>
