@@ -52,6 +52,27 @@ CREATE TABLE leads (
 CREATE INDEX idx_leads_status ON leads(status);
 CREATE INDEX idx_leads_campaign ON leads(campaign_queue_id);
 
+CREATE TABLE campaign_analytics (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  smartlead_campaign_id BIGINT NOT NULL UNIQUE,
+  campaign_name TEXT,
+  total_sent INT NOT NULL DEFAULT 0,
+  replied INT NOT NULL DEFAULT 0,
+  auto_replies INT NOT NULL DEFAULT 0,
+  true_replies INT NOT NULL DEFAULT 0,
+  true_reply_rate NUMERIC(5, 2),
+  bounced INT DEFAULT 0,
+  unsubscribed INT DEFAULT 0,
+  opened INT DEFAULT 0,
+  clicked INT DEFAULT 0,
+  raw_analytics JSONB,
+  snapshot_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_campaign_analytics_smartlead ON campaign_analytics(smartlead_campaign_id);
+CREATE INDEX idx_campaign_analytics_snapshot ON campaign_analytics(snapshot_at);
+
 CREATE TABLE niche_variable (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   niche TEXT NOT NULL UNIQUE,
