@@ -383,7 +383,7 @@ class Handler(BaseHTTPRequestHandler):
         import datetime
         now = datetime.datetime.now()
         date_fr = now.strftime("%d/%m/%Y à %Hh%M").lstrip("0")
-        discord_msg = f"[{action}] Nouveau clic — {date_fr}"
+        discord_msg = f"Une nouvelle visite le {date_fr} sur la page de {action}"
 
         self._serve_html(f"""<!DOCTYPE html>
 <html lang="fr">
