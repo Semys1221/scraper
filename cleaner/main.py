@@ -5,10 +5,10 @@ import logging
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import dns.resolver
-from config import get_supabase, push_to_smartlead, send_discord
+from database.config import get_supabase, push_to_smartlead, send_discord
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [CLEANER] %(message)s")
 log = logging.getLogger(__name__)

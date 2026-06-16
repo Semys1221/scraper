@@ -6,11 +6,11 @@ import urllib.parse
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import requests
-from engine import auto_run
-from config import (
+from engine.scraper import auto_run
+from database.config import (
     get_supabase,
     GEMINI_API_KEY,
     update_smartlead_sequences,
@@ -440,7 +440,6 @@ window.location.href='{redirect_url}';
             leads_cleaned = _count_leads_by_status("cleaned")
             leads_smartlead = _count_leads_by_status("imported_smartlead")
 
-            # Paginate to get per-niche breakdown (bypass 1000-row limit)
             niche_map = {}
             offset = 0
             while True:
@@ -545,7 +544,6 @@ window.location.href='{redirect_url}';
             if not variants:
                 return self._json({"error": "aucune variante dans email_templates.json"}, 400)
 
-            # Récupérer les variables de la niche
             niche_vars = sb.table("campaign_queue").select("objective, timeframe, constraint_, custom_intro").eq("niche", niche).limit(1).execute().data
             if niche_vars:
                 nv = niche_vars[0]
@@ -632,7 +630,7 @@ def _cleaner_keep_alive():
             requests.get(cleaner_url, timeout=10)
         except Exception:
             pass
-        time.sleep(600)  # 10 minutes
+        time.sleep(600)
 
 
 def start_http():

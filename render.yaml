@@ -4,8 +4,8 @@ services:
     runtime: python
     repo: https://github.com/Semys1221/scraper
     branch: main
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    buildCommand: pip install -r engine/requirements.txt
+    startCommand: python engine/main.py
     healthCheckPath: /
     plan: starter
     region: frankfurt
@@ -32,8 +32,8 @@ services:
     runtime: python
     repo: https://github.com/Semys1221/scraper
     branch: main
-    buildCommand: pip install -r requirements.txt
-    startCommand: python cleaner.py
+    buildCommand: pip install -r cleaner/requirements.txt
+    startCommand: python cleaner/main.py
     healthCheckPath: /health
     plan: starter
     region: frankfurt
