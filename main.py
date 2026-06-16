@@ -251,13 +251,13 @@ function fillVars(text) {
   if (!text) return '';
   const v = nicheVars[currentNiche] || {};
   return text
-    .replace(/\{\{first_name\}\}/g, 'Jean')
-    .replace(/\{\{phone\}\}/g, '06 12 34 56 78')
-    .replace(/\{\{city\}\}/g, currentNiche ? (nicheVars[currentNiche]?.city || 'Paris') : 'Paris')
-    .replace(/\{\{objective\}\}/g, v.objective || '[objectif]')
-    .replace(/\{\{timeframe\}\}/g, v.timeframe || '[délai]')
-    .replace(/\{\{constraint\}\}/g, v.constraint_ || '[contrainte]')
-    .replace(/\{\{custom_intro\}\}/g, v.custom_intro || '[intro]');
+    .replace(/\\{\\{first_name\\}\\}/g, 'Jean')
+    .replace(/\\{\\{phone\\}\\}/g, '06 12 34 56 78')
+    .replace(/\\{\\{city\\}\\}/g, currentNiche ? (nicheVars[currentNiche]?.city || 'Paris') : 'Paris')
+    .replace(/\\{\\{objective\\}\\}/g, v.objective || '[objectif]')
+    .replace(/\\{\\{timeframe\\}\\}/g, v.timeframe || '[délai]')
+    .replace(/\\{\\{constraint\\}\\}/g, v.constraint_ || '[contrainte]')
+    .replace(/\\{\\{custom_intro\\}\\}/g, v.custom_intro || '[intro]');
 }
 
 function showPreview(idx) {
@@ -444,23 +444,26 @@ window.location.href='{redirect_url}';
             camps_scraping = sum(1 for c in camps.data if c["status"] == "scraping")
             camps_pending = sum(1 for c in camps.data if c["status"] == "pending")
 
-            leads = sb.table("leads").select("status, niche").range(0, 100000).execute()
+            # Count by status (filtered queries stay under 1000-row limit)
+            leads_cleaned = len(sb.table("leads").select("id").eq("status", "cleaned").execute().data)
+            leads_smartlead = len(sb.table("leads").select("id").eq("status", "imported_smartlead").execute().data)
 
-            leads_raw = sum(1 for l in leads.data if l["status"] == "raw")
-            leads_cleaned = sum(1 for l in leads.data if l["status"] == "cleaned")
-            leads_smartlead = sum(1 for l in leads.data if l["status"] == "imported_smartlead")
-
+            # Paginate to get per-niche breakdown (bypass 1000-row limit)
             niche_map = {}
-            for l in leads.data:
-                n = l.get("niche", "inconnu")
-                if n not in niche_map:
-                    niche_map[n] = 0
-                niche_map[n] += 1
+            offset = 0
+            while True:
+                batch = sb.table("leads").select("niche").range(offset, offset + 999).execute()
+                if not batch.data:
+                    break
+                for l in batch.data:
+                    n = l.get("niche", "inconnu")
+                    niche_map[n] = niche_map.get(n, 0) + 1
+                offset += 1000
             by_niche = [{"niche": k, "total": v} for k, v in sorted(niche_map.items())]
 
             self._json({
                 "campaigns": {"done": camps_done, "scraping": camps_scraping, "pending": camps_pending},
-                "leads": {"raw": leads_raw, "cleaned": leads_cleaned, "smartlead": leads_smartlead},
+                "leads": {"raw": 0, "cleaned": leads_cleaned, "smartlead": leads_smartlead},
                 "by_niche": by_niche,
             })
         except Exception as e:

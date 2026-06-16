@@ -3,14 +3,10 @@ CREATE TABLE campaign_queue (
   niche TEXT NOT NULL,
   city TEXT NOT NULL,
   niche_target TEXT,
-  objective TEXT,
-  timeframe TEXT,
-  constraint_ TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'scraping', 'done')),
   batch INTEGER DEFAULT 1,
   smartlead_campaign_id BIGINT,
-  custom_intro TEXT,
   include_keywords TEXT,
   exclude_keywords TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -55,36 +51,39 @@ CREATE TABLE leads (
 CREATE INDEX idx_leads_status ON leads(status);
 CREATE INDEX idx_leads_campaign ON leads(campaign_queue_id);
 
-CREATE TABLE email_sequence_cgp (
+CREATE TABLE niche_variable (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  common_niche TEXT NOT NULL,
-  niche TEXT NOT NULL,
-  phone TEXT,
+  niche TEXT NOT NULL UNIQUE,
+  niche_keyword_1 TEXT,
+  niche_keyword_2 TEXT,
+  niche_keyword_3 TEXT,
+  niche_member TEXT,
   objectif TEXT,
-  benefice_delai TEXT,
-  cta TEXT,
-  signature TEXT,
-  email_sender TEXT,
-  time_in_between INTEGER,
-  email_template TEXT,
-  email_smartlead TEXT,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now(),
-  pushed BOOLEAN NOT NULL DEFAULT false,
-  subject TEXT,
-  delai_promesse TEXT,
-  pourcentage_reduction TEXT,
-  booking_link TEXT,
-  testimonial_link TEXT,
-  tracking_webhook TEXT,
-  greeting TEXT,
-  day INTEGER,
-  variant TEXT DEFAULT 'A',
-  step INTEGER,
-  methode_tease TEXT,
   pain_point TEXT,
-  objectif_alt TEXT
+  methode TEXT,
+  offre TEXT,
+  timeline TEXT DEFAULT '60 jours',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_email_sequence_common_niche ON email_sequence_cgp(common_niche);
-CREATE INDEX idx_email_sequence_niche ON email_sequence_cgp(niche);
+CREATE TRIGGER trg_niche_variable_updated_at
+  BEFORE UPDATE ON niche_variable
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at();
+
+CREATE TABLE campaign_settings (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  smartlead_campaign_id INT NOT NULL UNIQUE,
+  schedule JSONB,
+  settings JSONB,
+  email_account_ids INT[],
+  raw JSONB,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TRIGGER trg_campaign_settings_updated_at
+  BEFORE UPDATE ON campaign_settings
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at();

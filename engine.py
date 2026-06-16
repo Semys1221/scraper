@@ -15,7 +15,7 @@ from config import (
     send_discord,
 ) 
 
-BATCH_SIZE = 500
+BATCH_SIZE = 100
 TARGET_PER_NICHE = 20_000
 RETRY_DELAY = 10
 MAX_CONCURRENT = 3
@@ -47,13 +47,13 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
 
     total_inserted = 0
     total_filtered = 0
-    offset = 0
+    skip = 0
 
     while True:
         params = {
             "query": f"{niche} {city}",
             "limit": BATCH_SIZE,
-            "offset": offset,
+            "skip": skip,
             "language": "fr",
             "enrichment": "contacts_n_leads",
         }
@@ -109,7 +109,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
         if items and isinstance(items, list) and len(items) > 0 and isinstance(items[0], list):
             items = items[0]
         if not items:
-            print(f"[ENGINE] 0 résultats à offset {offset}, ville épuisée")
+            print(f"[ENGINE] 0 résultats à skip {skip}, ville épuisée")
             break
 
         inserted = 0
@@ -147,11 +147,11 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
                     print(f"[ENGINE] Erreur upsert {email}: {e}")
 
         total_inserted += inserted
-        print(f"[ENGINE] +{inserted} leads (total: {total_inserted}) à offset {offset}")
+        print(f"[ENGINE] +{inserted} leads (total: {total_inserted}) à skip {skip}")
 
         if len(items) < BATCH_SIZE:
             break
-        offset += BATCH_SIZE
+        skip += BATCH_SIZE
 
     sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
     print(f"[ENGINE] {niche} / {city} terminée ({total_inserted} leads, {total_filtered} filtrés)")
