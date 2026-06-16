@@ -424,9 +424,19 @@ window.location.href='{redirect_url}';
             camps_scraping = sum(1 for c in camps.data if c["status"] == "scraping")
             camps_pending = sum(1 for c in camps.data if c["status"] == "pending")
 
-            # Count by status (filtered queries stay under 1000-row limit)
-            leads_cleaned = len(sb.table("leads").select("id").eq("status", "cleaned").execute().data)
-            leads_smartlead = len(sb.table("leads").select("id").eq("status", "imported_smartlead").execute().data)
+            def _count_leads_by_status(status):
+                total = 0
+                offset = 0
+                while True:
+                    batch = sb.table("leads").select("id").eq("status", status).range(offset, offset + 999).execute()
+                    if not batch.data:
+                        break
+                    total += len(batch.data)
+                    offset += 1000
+                return total
+
+            leads_cleaned = _count_leads_by_status("cleaned")
+            leads_smartlead = _count_leads_by_status("imported_smartlead")
 
             # Paginate to get per-niche breakdown (bypass 1000-row limit)
             niche_map = {}
