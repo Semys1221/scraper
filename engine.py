@@ -17,6 +17,8 @@ from config import (
 
 BATCH_SIZE = 100
 TARGET_PER_NICHE = 20_000
+TARGET_CYCLE = 2000
+TARGET_MAX = 6000
 RETRY_DELAY = 10
 MAX_CONCURRENT = 3
 POLL_INTERVAL = 60
@@ -158,7 +160,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
     return total_inserted
 
 
-def _scrape_niche(niche: str):
+def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
     sb = get_supabase()
 
     cities = (
@@ -182,20 +184,31 @@ def _scrape_niche(niche: str):
 
     total = 0
     for camp in cities.data:
-        if total >= TARGET_PER_NICHE:
-            print(f"[ENGINE] Objectif {TARGET_PER_NICHE} atteint pour '{niche}'")
+        if total >= target:
+            print(f"[ENGINE] Objectif {target} atteint pour '{niche}'")
             break
         inserted = _scrape_city(sb, niche, camp["city"], camp["id"], include_kw, exclude_kw)
         total += inserted
-        print(f"[ENGINE] Total {niche}: {total}/{TARGET_PER_NICHE}")
+        print(f"[ENGINE] Total {niche}: {total}/{target}")
 
     if total > 0:
         send_discord(f"[TERMINÉ] **{niche}** : {total} leads scrapés")
     return total
 
 
+def _get_smartlead_count(sb, niche: str) -> int:
+    result = (
+        sb.table("leads")
+        .select("id")
+        .eq("niche", niche)
+        .eq("status", "imported_smartlead")
+        .execute()
+    )
+    return len(result.data)
+
+
 def auto_run():
-    print(f"[ENGINE] Mode auto — {MAX_CONCURRENT} niches concurrentes")
+    print(f"[ENGINE] Mode auto — {MAX_CONCURRENT} niches concurrentes | cycle={TARGET_CYCLE} max={TARGET_MAX}")
 
     while True:
         sb = get_supabase()
@@ -204,28 +217,60 @@ def auto_run():
 
         result = (
             sb.table("campaign_queue")
-            .select("niche")
+            .select("niche, priority")
             .eq("status", "pending")
             .execute()
         )
 
-        all_niches = sorted(set(r["niche"] for r in result.data)) if result.data else []
-
-        if not all_niches:
+        if not result.data:
             print(f"[ENGINE] Aucune niche pending. Nouvelle vérification dans {POLL_INTERVAL}s")
             time.sleep(POLL_INTERVAL)
             continue
 
-        niches = all_niches[:MAX_CONCURRENT]
-        print(f"[ENGINE] Niches à traiter: {niches} (sur {len(all_niches)} en attente)")
+        # Build unique niches with their priority
+        niche_priorities = {}
+        for r in result.data:
+            n = r["niche"]
+            if n not in niche_priorities:
+                niche_priorities[n] = r.get("priority", 99)
 
-        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT) as executor:
-            futures = {executor.submit(_scrape_niche, n): n for n in niches}
+        # Sort by priority (lowest first), then alpha
+        all_niches = sorted(niche_priorities.keys(), key=lambda n: (niche_priorities.get(n, 99), n))
+
+        # Separate priority niches (1-3) from the rest
+        priority_niches = [n for n in all_niches if niche_priorities.get(n, 99) <= 3]
+        other_niches = [n for n in all_niches if niche_priorities.get(n, 99) > 3]
+
+        # For priority niches: check Smartlead counts and cap per cycle
+        ready = []
+        for n in priority_niches:
+            current = _get_smartlead_count(sb, n)
+            if current >= TARGET_MAX:
+                print(f"[ENGINE] 🎯 {n}: {current}/{TARGET_MAX} — objectif atteint, ignoré")
+                continue
+            per_run = min(TARGET_CYCLE, TARGET_MAX - current)
+            ready.append((n, per_run, current))
+
+        # Fill remaining slots with other niches (no cap)
+        slots_left = MAX_CONCURRENT - len(ready)
+        for n in other_niches[:slots_left]:
+            ready.append((n, TARGET_PER_NICHE, 0))
+
+        if not ready:
+            print(f"[ENGINE] ✅ Tous les objectifs atteints. Nouvelle vérification dans {POLL_INTERVAL}s")
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        print(f"[ENGINE] Niches à traiter: {[(n, t) for n, t, _ in ready]}")
+
+        with ThreadPoolExecutor(max_workers=len(ready)) as executor:
+            futures = {executor.submit(_scrape_niche, n, t): (n, c) for n, t, c in ready}
             for future in as_completed(futures):
-                n = futures[future]
+                n, current = futures[future]
                 try:
                     total = future.result()
-                    print(f"[ENGINE] ✅ {n} terminée: {total} leads")
+                    new_total = current + total
+                    print(f"[ENGINE] ✅ {n}: {current} → {new_total}/{TARGET_MAX}")
                 except Exception as e:
                     print(f"[ENGINE] ❌ {n} en erreur: {e}")
 

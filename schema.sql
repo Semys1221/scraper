@@ -3,6 +3,7 @@ CREATE TABLE campaign_queue (
   niche TEXT NOT NULL,
   city TEXT NOT NULL,
   niche_target TEXT,
+  priority INTEGER DEFAULT 99,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'scraping', 'done')),
   batch INTEGER DEFAULT 1,
