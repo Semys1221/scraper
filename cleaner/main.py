@@ -7,8 +7,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-import dns.resolver
-from database.config import get_supabase, push_to_smartlead, send_discord
+from database.config import get_supabase, send_discord
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [CLEANER] %(message)s")
 log = logging.getLogger(__name__)
@@ -38,6 +37,11 @@ def _is_generic(email: str) -> bool:
 
 
 def _has_mx(domain: str) -> bool:
+    try:
+        import dns.resolver
+    except ImportError:
+        log.warning("dnspython not installed — skipping MX validation")
+        return True
     try:
         answers = dns.resolver.resolve(domain, "MX", lifetime=10)
         return len(answers) > 0
@@ -109,34 +113,6 @@ def _process_batch(sb):
 
         processed += 1
 
-    if cleaned_valid:
-        smartlead_id = None
-        if cleaned_valid[0].get("campaign_queue_id"):
-            camp = (
-                sb.table("campaign_queue")
-                .select("smartlead_campaign_id")
-                .eq("id", cleaned_valid[0]["campaign_queue_id"])
-                .single()
-                .execute()
-                .data
-            )
-            if camp:
-                smartlead_id = camp.get("smartlead_campaign_id")
-
-        if smartlead_id:
-            success, fail = push_to_smartlead(smartlead_id, cleaned_valid)
-            if success > 0:
-                emails = [l["email"] for l in cleaned_valid[:success]]
-                for i in range(0, len(emails), 100):
-                    batch = emails[i:i + 100]
-                    try:
-                        sb.table("leads").update({"status": "imported_smartlead"}).in_("email", batch).execute()
-                    except Exception as e:
-                        log.error("Erreur update imported_smartlead: %s", e)
-                log.info("%s leads poussés Smartlead", success)
-            if fail > 0:
-                log.warning("%s échecs Smartlead", fail)
-
     log.info("Batch: %s traités, %s valides, %s invalides", processed, len(cleaned_valid), cleaned_invalid)
     return processed
 
@@ -161,7 +137,18 @@ def _start_http():
     server.serve_forever()
 
 
+def _ensure_deps():
+    try:
+        import dns.resolver
+    except ImportError:
+        log.warning("dnspython missing — attempting pip install")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "dnspython", "-q"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def main():
+    _ensure_deps()
     log.info("Cleaner démarré — MX + SMTP handshake")
 
     t = threading.Thread(target=_start_http, daemon=True)
