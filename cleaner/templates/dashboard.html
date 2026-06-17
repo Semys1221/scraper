@@ -217,7 +217,7 @@
 <div class="error-banner hidden" id="error-banner"></div>
 
 <script>
-const TENANT_ID = '{{ request.query_params.get("tenant_id", "sylk-conseils") }}';
+const TENANT_ID = '{{ request.query_params.get("tenant_id", "") }}';
 
 // Icons as SVG strings
 const ICONS = {
@@ -231,10 +231,10 @@ const ICONS = {
 
 // Card configs
 const CARDS = [
-  { key: 'cold', label: 'Leads bruts', icon: ICONS.database, color: 'from-blue-600/20 to-blue-900/10', border: 'border-blue-800/30', glow: 'rgba(59,130,246,0.15)', iconColor: '#60a5fa' },
-  { key: 'clean', label: 'Leads nettoyés', icon: ICONS.sparkles, color: 'from-emerald-600/20 to-emerald-900/10', border: 'border-emerald-800/30', glow: 'rgba(16,185,129,0.15)', iconColor: '#34d399' },
-  { key: 'outscraper', label: 'Appels API', icon: ICONS.chart, color: 'from-violet-600/20 to-violet-900/10', border: 'border-violet-800/30', glow: 'rgba(139,92,246,0.15)', iconColor: '#a78bfa' },
-  { key: 'activeCampaigns', label: 'Campagnes actives', icon: ICONS.play, color: 'from-amber-600/20 to-amber-900/10', border: 'border-amber-800/30', glow: 'rgba(245,158,11,0.15)', iconColor: '#fbbf24' },
+  { key: 'total', label: 'Total leads', icon: ICONS.database, color: 'from-blue-600/20 to-blue-900/10', border: 'border-blue-800/30', glow: 'rgba(59,130,246,0.15)', iconColor: '#60a5fa' },
+  { key: 'byStatus', label: 'Par statut', icon: ICONS.sparkles, color: 'from-emerald-600/20 to-emerald-900/10', border: 'border-emerald-800/30', glow: 'rgba(16,185,129,0.15)', iconColor: '#34d399' },
+  { key: 'valid', label: 'Valides', icon: ICONS.chart, color: 'from-violet-600/20 to-violet-900/10', border: 'border-violet-800/30', glow: 'rgba(139,92,246,0.15)', iconColor: '#a78bfa' },
+  { key: 'today', label: "Aujourd'hui", icon: ICONS.play, color: 'from-amber-600/20 to-amber-900/10', border: 'border-amber-800/30', glow: 'rgba(245,158,11,0.15)', iconColor: '#fbbf24' },
 ];
 
 // Event type configs
@@ -258,7 +258,7 @@ let statsData = null;
 
 async function fetchStats() {
   try {
-    const r = await fetch(`/api/stats?tenant_id=${TENANT_ID}`);
+      const r = await fetch(`/api/stats`);
     if (!r.ok) throw new Error('Stats fetch failed');
     statsData = await r.json();
     renderStats(statsData);
@@ -276,13 +276,17 @@ function renderStats(data) {
     let value = 0;
     let breakdown = [];
 
-    if (card.key === 'cold' || card.key === 'clean') {
-      const d = data[card.key];
-      if (d) { value = d.total; breakdown = [['Aujourd\'hui', d.today], ['Cette semaine', d.week], ['Ce mois', d.month]]; }
-    } else if (card.key === 'outscraper') {
-      if (data.outscraper) { value = data.outscraper.apiCalls; breakdown = [['Places', data.outscraper.totalPlaces], ['Contacts', data.outscraper.totalContacts], ['Stockés', data.outscraper.totalStored]]; }
-    } else if (card.key === 'activeCampaigns') {
-      value = data.activeCampaigns ?? 0;
+    if (card.key === 'total') {
+      value = data.total ?? 0;
+      breakdown = [['Cette semaine', data.week ?? 0], ['Ce mois', data.month ?? 0]];
+    } else if (card.key === 'byStatus') {
+      value = data.byStatus?.raw ?? 0;
+      breakdown = [['Bruts', data.byStatus?.raw ?? 0], ['Nettoyés', data.byStatus?.cleaned ?? 0], ['Exclus', data.byStatus?.excluded ?? 0], ['Importés', data.byStatus?.imported ?? 0]];
+    } else if (card.key === 'valid') {
+      value = data.valid ?? 0;
+    } else if (card.key === 'today') {
+      value = data.today ?? 0;
+      breakdown = [['Total', data.total ?? 0]];
     }
 
     const el = document.createElement('div');
@@ -318,7 +322,7 @@ async function fetchActivity() {
     const since = events.length > 0
       ? new Date(new Date(events[0].timestamp).getTime() - 1000).toISOString()
       : undefined;
-    const params = new URLSearchParams({ tenant_id: TENANT_ID });
+    const params = new URLSearchParams();
     if (since) params.set('since', since);
 
     const r = await fetch(`/api/activity?${params}`);

@@ -132,18 +132,20 @@ PORT = int(os.getenv("PORT", 8001))
 TENANT_ID = os.getenv("TENANT_ID", "sylk-conseils")
 
 
-def _safe_count(table: str, gte: str | None = None) -> int:
+def _safe_count(table: str, gte: str | None = None, status_eq: str | None = None) -> int:
     sb = get_supabase()
-    q = sb.table(table).select("*", count="exact", head=True).eq("tenant_id", TENANT_ID)
+    q = sb.table(table).select("*", count="exact", head=True)
     if gte:
         q = q.gte("created_at", gte)
+    if status_eq:
+        q = q.eq("status", status_eq)
     r = q.execute()
     return r.count or 0
 
 
 def _safe_fetch(table: str, columns: str, gte: str | None, limit: int = 50):
     sb = get_supabase()
-    q = sb.table(table).select(columns).eq("tenant_id", TENANT_ID)
+    q = sb.table(table).select(columns)
     if gte:
         q = q.gte("created_at", gte)
     q = q.order("created_at", desc=True).limit(limit)
@@ -199,28 +201,29 @@ def _get_web_app():
         week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
 
-        cold_total = _safe_count("cold_leads")
-        cold_today = _safe_count("cold_leads", today)
-        cold_week = _safe_count("cold_leads", week)
-        cold_month = _safe_count("cold_leads", month)
+        total = _safe_count("leads")
+        total_today = _safe_count("leads", today)
+        total_week = _safe_count("leads", week)
+        total_month = _safe_count("leads", month)
 
-        clean_total = _safe_count("clean_leads")
-        clean_today = _safe_count("clean_leads", today)
-        clean_week = _safe_count("clean_leads", week)
-        clean_month = _safe_count("clean_leads", month)
-
-        usage = _safe_fetch("outscraper_usage", "places_count, contacts_count, leads_stored", None, 99999)
-        total_places = sum(r.get("places_count", 0) or 0 for r in usage)
-        total_contacts = sum(r.get("contacts_count", 0) or 0 for r in usage)
-        total_stored = sum(r.get("leads_stored", 0) or 0 for r in usage)
-
-        active = _safe_count("scrape_campaigns")
+        raw = _safe_count("leads", status_eq="raw")
+        cleaned = _safe_count("leads", status_eq="cleaned")
+        excluded = _safe_count("leads", status_eq="excluded")
+        imported = _safe_count("leads", status_eq="imported_smartlead")
+        valid = _safe_count("leads", status_eq="cleaned")  # just count cleaned as valid
 
         return {
-            "cold": {"total": cold_total, "today": cold_today, "week": cold_week, "month": cold_month},
-            "clean": {"total": clean_total, "today": clean_today, "week": clean_week, "month": clean_month},
-            "outscraper": {"totalPlaces": total_places, "totalContacts": total_contacts, "totalStored": total_stored, "apiCalls": len(usage)},
-            "activeCampaigns": active,
+            "total": total,
+            "today": total_today,
+            "week": total_week,
+            "month": total_month,
+            "byStatus": {
+                "raw": raw,
+                "cleaned": cleaned,
+                "excluded": excluded,
+                "imported": imported,
+            },
+            "valid": valid,
         }
 
     @app.get("/api/activity", include_in_schema=False)
@@ -230,35 +233,21 @@ def _get_web_app():
 
         events = []
 
-        clean_data = _safe_fetch("clean_leads", "id, email, first_name, last_name, company_name, profession, niche, status, created_at", since, 50)
-        for r in clean_data:
-            name = f"{r.get('first_name', '') or ''} {r.get('last_name', '') or ''}".strip() or r.get("email", "")
+        leads_data = _safe_fetch("leads", "id, email, first_name, company_name, niche, status, valid, updated_at, created_at", since, 50)
+        for r in leads_data:
+            name = r.get("first_name", "") or r.get("email", "")
+            ts = r.get("updated_at") or r.get("created_at", "")
+            status = r.get("status", "")
+            valid = r.get("valid")
+            subtitle = r.get("company_name", "") or r.get("niche", "") or ""
+            if status == "cleaned":
+                subtitle += f" — {'valide' if valid else 'invalide'}"
             events.append({
-                "id": f"clean-{r['id']}",
-                "type": "lead_cleaned",
+                "id": f"lead-{r['id']}",
+                "type": "lead_cleaned" if status == "cleaned" else "api_call",
                 "title": name,
-                "subtitle": f"{r.get('company_name', '') or ''} — {r.get('profession', '') or r.get('niche', '') or ''}",
-                "timestamp": r.get("created_at", ""),
-            })
-
-        usage_data = _safe_fetch("outscraper_usage", "id, query, location, places_count, contacts_count, leads_stored, execution_time_ms, created_at", since, 20)
-        for r in usage_data:
-            events.append({
-                "id": f"api-{r['id']}",
-                "type": "api_call",
-                "title": f"{r.get('query', '')} @ {r.get('location', '')}",
-                "subtitle": f"{r.get('places_count', 0)} places, {r.get('contacts_count', 0)} contacts, {r.get('leads_stored', 0)} stored",
-                "timestamp": r.get("created_at", ""),
-            })
-
-        campaign_data = _safe_fetch("scrape_campaigns", "id, name, keywords, status, leads_found, leads_cleaned, created_at", since, 10)
-        for r in campaign_data:
-            events.append({
-                "id": f"cmp-{r['id']}",
-                "type": "campaign",
-                "title": r.get("name", ""),
-                "subtitle": f"{r.get('leads_found', 0)} found, {r.get('leads_cleaned', 0)} cleaned — {r.get('status', '')}",
-                "timestamp": r.get("created_at", ""),
+                "subtitle": subtitle,
+                "timestamp": ts,
             })
 
         events.sort(key=lambda e: e["timestamp"], reverse=True)
