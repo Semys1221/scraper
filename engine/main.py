@@ -345,30 +345,18 @@ window.location.href='{redirect_url}';
             camps_scraping = sum(1 for c in camps.data if c["status"] == "scraping")
             camps_pending = sum(1 for c in camps.data if c["status"] == "pending")
 
-            def _count_leads_by_status(status):
-                total = 0
-                offset = 0
-                while True:
-                    batch = sb.table("leads").select("id").eq("status", status).range(offset, offset + 999).execute()
-                    if not batch.data:
-                        break
-                    total += len(batch.data)
-                    offset += 1000
-                return total
+            def _count(status):
+                r = sb.table("leads").select("id", count="exact").eq("status", status).execute()
+                return r.count if hasattr(r, "count") and r.count is not None else len(r.data)
 
-            leads_cleaned = _count_leads_by_status("cleaned")
-            leads_smartlead = _count_leads_by_status("imported_smartlead")
+            leads_cleaned = _count("cleaned")
+            leads_smartlead = _count("imported_smartlead")
 
+            all_r = sb.table("leads").select("niche").limit(10000).execute()
             niche_map = {}
-            offset = 0
-            while True:
-                batch = sb.table("leads").select("niche").range(offset, offset + 999).execute()
-                if not batch.data:
-                    break
-                for l in batch.data:
-                    n = l.get("niche", "inconnu")
-                    niche_map[n] = niche_map.get(n, 0) + 1
-                offset += 1000
+            for l in all_r.data:
+                n = l.get("niche", "inconnu")
+                niche_map[n] = niche_map.get(n, 0) + 1
             by_niche = [{"niche": k, "total": v} for k, v in sorted(niche_map.items())]
 
             self._json({
