@@ -101,26 +101,56 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
 <div class="footer" id="updated">Dernière mise à jour: -</div>
 
 <script>
+// --- Safe fetch with timeout ---
+async function fetchJSON(url, opts, timeout=8000){
+  const c = new AbortController();
+  const id = setTimeout(() => c.abort(), timeout);
+  try {
+    const r = await fetch(url, {...opts, signal: c.signal});
+    return await r.json();
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+function setText(id, val){
+  const el = document.getElementById(id);
+  if(el) el.textContent = val;
+}
+
+function setHTML(id, html){
+  const el = document.getElementById(id);
+  if(el) el.innerHTML = html;
+}
+
+// --- Stats ---
 const MAX = 20000;
+let statsOk = false;
+
 async function refresh(){
   try{
-    const r = await fetch('/api/stats');
-    const d = await r.json();
-    document.getElementById('done').textContent = d.campaigns.done;
-    document.getElementById('scraping').textContent = d.campaigns.scraping;
-    document.getElementById('pending').textContent = d.campaigns.pending;
-    document.getElementById('raw').textContent = d.leads.raw;
-    document.getElementById('cleaned').textContent = d.leads.cleaned;
-    document.getElementById('smartlead').textContent = d.leads.smartlead;
-    const tbody = document.getElementById('niche-rows');
-    tbody.innerHTML = '';
+    const d = await fetchJSON('/api/stats');
+    if(d.error) throw new Error(d.error);
+    statsOk = true;
+    setText('done', d.campaigns.done);
+    setText('scraping', d.campaigns.scraping);
+    setText('pending', d.campaigns.pending);
+    setText('raw', d.leads.raw);
+    setText('cleaned', d.leads.cleaned);
+    setText('smartlead', d.leads.smartlead);
+    let rows = '';
     for(const n of d.by_niche){
       const pct = Math.min(100, (n.total / MAX * 100));
       const color = n.total >= MAX ? '#22c55e' : '#3b82f6';
-      tbody.innerHTML += '<tr><td>' + n.niche + '</td><td>' + n.total + '</td><td><div class="bar"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div></td></tr>';
+      rows += '<tr><td>' + n.niche + '</td><td>' + n.total + '</td><td><div class="bar"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div></td></tr>';
     }
-    document.getElementById('updated').textContent = 'Dernière mise à jour: ' + new Date().toLocaleTimeString();
-  }catch(e){document.getElementById('updated').textContent = 'Erreur: '+e.message}
+    setHTML('niche-rows', rows || '<tr><td colspan="3" style="text-align:center;color:#64748b;padding:16px">Aucune donnée</td></tr>');
+    setText('updated', 'Dernière mise à jour: ' + new Date().toLocaleTimeString());
+  }catch(e){
+    if(!statsOk) return; // keep spinners on first load
+    setHTML('niche-rows', '<tr><td colspan="3" style="text-align:center;color:#ef4444;padding:16px">⚠ Erreur: ' + e.message + '</td></tr>');
+    setText('updated', 'Erreur: ' + e.message);
+  }
 }
 refresh();
 setInterval(refresh, 5000);
@@ -128,10 +158,10 @@ setInterval(refresh, 5000);
 // --- Scraping controls ---
 async function refreshScrapeStatus(){
   try{
-    const r = await fetch('/api/scrape/status');
-    const jobs = await r.json();
+    const d = await fetchJSON('/api/scrape/status');
+    if(d.error) throw new Error(d.error);
     const container = document.getElementById('scrape-jobs');
-    const entries = Object.entries(jobs);
+    const entries = Object.entries(d);
     if(!entries.length){
       container.innerHTML = '<div style="color:#64748b;font-size:13px">Aucun scraping en cours</div>';
       return;
@@ -162,21 +192,26 @@ async function refreshScrapeStatus(){
       html += '</div>';
     }
     container.innerHTML = html;
-  }catch(e){}
+  }catch(e){
+    setHTML('scrape-jobs', '<div style="color:#ef4444;font-size:13px">⚠ Erreur chargement: ' + e.message + '</div>');
+  }
 }
 refreshScrapeStatus();
 setInterval(refreshScrapeStatus, 2000);
 
 async function loadCampaigns(){
   try{
-    const r = await fetch('/api/scrape/campaigns');
-    const d = await r.json();
+    const d = await fetchJSON('/api/scrape/campaigns');
+    if(d.error) throw new Error(d.error);
     const sel = document.getElementById('scrape-niche');
     sel.innerHTML = '<option value="">Sélectionne une niche...</option>';
     for(const c of d.campaigns){
       sel.innerHTML += '<option value="' + c.niche + '">' + c.niche + ' (' + c.cities.length + ' villes, priorité ' + c.priority + ')</option>';
     }
-  }catch(e){}
+  }catch(e){
+    const sel = document.getElementById('scrape-niche');
+    sel.innerHTML = '<option value="">⚠ Erreur: ' + e.message + '</option>';
+  }
 }
 
 async function startScrape(){
@@ -184,7 +219,7 @@ async function startScrape(){
   const niche = sel.value;
   if(!niche) return;
   const limit = parseInt(document.getElementById('scrape-limit').value) || 2000;
-  await fetch('/api/scrape/start', {
+  await fetchJSON('/api/scrape/start', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({niche, limit})
   });
@@ -194,7 +229,7 @@ async function startScrape(){
 loadCampaigns();
 
 async function stopScrape(niche){
-  await fetch('/api/scrape/stop', {
+  await fetchJSON('/api/scrape/stop', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({niche})
   });
@@ -209,24 +244,24 @@ let prevLogs = [];
 
 async function refreshLogs(){
   try{
-    const r = await fetch('/api/scrape/logs?limit=50');
-    const logs = await r.json();
-    if(JSON.stringify(logs) === JSON.stringify(prevLogs)) return;
-    prevLogs = logs;
+    const d = await fetchJSON('/api/scrape/logs?limit=50');
+    if(d.error) throw new Error(d.error);
+    if(JSON.stringify(d) === JSON.stringify(prevLogs)) return;
+    prevLogs = d;
 
     const container = document.getElementById('api-log');
-    if(!logs.length){
+    if(!d.length){
       container.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px 0">En attente d\'activité...</div>';
-      document.getElementById('log-count').textContent = '0 req/min';
+      setText('log-count', '0 req/min');
       return;
     }
 
     const now = Date.now() / 1000;
-    const recent = logs.filter(l => now - l.ts < 60).length;
-    document.getElementById('log-count').textContent = recent + ' req/min';
+    const recent = d.filter(l => now - l.ts < 60).length;
+    setText('log-count', recent + ' req/min');
 
     let html = '';
-    for(const l of logs.slice(-50).reverse()){
+    for(const l of d.slice(-50).reverse()){
       const color = logColors[l.type] || '#64748b';
       const label = logLabels[l.type] || l.type;
       const icon = logIcons[l.type] || '•';
@@ -240,7 +275,9 @@ async function refreshLogs(){
     }
     container.innerHTML = html;
     container.scrollTop = 0;
-  }catch(e){}
+  }catch(e){
+    setHTML('api-log', '<div style="color:#ef4444;text-align:center;padding:16px;font-size:12px">⚠ Connexion perdue: ' + e.message + '</div>');
+  }
 }
 refreshLogs();
 setInterval(refreshLogs, 1000);
@@ -340,21 +377,31 @@ window.location.href='{redirect_url}';
     def _handle_stats(self):
         try:
             sb = get_supabase()
-            camps = sb.table("campaign_queue").select("status").execute()
-            camps_done = sum(1 for c in camps.data if c["status"] == "done")
-            camps_scraping = sum(1 for c in camps.data if c["status"] == "scraping")
-            camps_pending = sum(1 for c in camps.data if c["status"] == "pending")
+
+            def _safe(desc, fn, default=0):
+                try:
+                    return fn()
+                except Exception as e:
+                    print(f"[STATS] ⚠ {desc}: {e}")
+                    return default
+
+            camps = _safe("campaign_queue", lambda: sb.table("campaign_queue").select("status").execute())
+            camps_data = camps.data if hasattr(camps, 'data') else []
+            camps_done = sum(1 for c in camps_data if c["status"] == "done")
+            camps_scraping = sum(1 for c in camps_data if c["status"] == "scraping")
+            camps_pending = sum(1 for c in camps_data if c["status"] == "pending")
 
             def _count(status):
                 r = sb.table("leads").select("id", count="exact").eq("status", status).execute()
                 return r.count if hasattr(r, "count") and r.count is not None else len(r.data)
 
-            leads_cleaned = _count("cleaned")
-            leads_smartlead = _count("imported_smartlead")
+            leads_cleaned = _safe("count cleaned", lambda: _count("cleaned"))
+            leads_smartlead = _safe("count smartlead", lambda: _count("imported_smartlead"))
 
-            all_r = sb.table("leads").select("niche").limit(10000).execute()
+            all_r = _safe("niche list", lambda: sb.table("leads").select("niche").limit(10000).execute(), [])
+            all_data = all_r.data if hasattr(all_r, 'data') else []
             niche_map = {}
-            for l in all_r.data:
+            for l in all_data:
                 n = l.get("niche", "inconnu")
                 niche_map[n] = niche_map.get(n, 0) + 1
             by_niche = [{"niche": k, "total": v} for k, v in sorted(niche_map.items())]
@@ -410,15 +457,20 @@ window.location.href='{redirect_url}';
     def _handle_scrape_campaigns(self):
         try:
             sb = get_supabase()
-            result = (
-                sb.table("campaign_queue")
-                .select("niche, city, priority")
-                .eq("status", "pending")
-                .order("priority")
-                .execute()
-            )
+            try:
+                result = (
+                    sb.table("campaign_queue")
+                    .select("niche, city, priority")
+                    .eq("status", "pending")
+                    .order("priority")
+                    .execute()
+                )
+                rows = result.data
+            except Exception as e:
+                print(f"[CAMPAIGNS] ⚠ {e}")
+                rows = []
             groups = {}
-            for r in result.data:
+            for r in rows:
                 n = r["niche"]
                 if n not in groups:
                     groups[n] = {"niche": n, "cities": [], "priority": r.get("priority", 99)}
