@@ -32,7 +32,7 @@ services:
     runtime: python
     repo: https://github.com/Semys1221/scraper
     branch: main
-    buildCommand: pip install -r cleaner/requirements.txt
+    buildCommand: pip install dnspython && pip install -r cleaner/requirements.txt
     startCommand: python main.py
     healthCheckPath: /health
     plan: starter
