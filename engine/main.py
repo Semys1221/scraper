@@ -204,7 +204,7 @@ async function refreshScrapeStatus(){
       html += '</div>';
       html += '<div class="bar"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>';
       if(job.status === 'running' || job.status === 'queued'){
-        html += '<button onclick="stopScrape(\'' + niche + '\')" style="margin-top:8px;padding:4px 12px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;font-size:12px;cursor:pointer">⏹ Stop</button>';
+        html += '<button class="stop-btn" data-niche="' + niche + '" style="margin-top:8px;padding:4px 12px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;font-size:12px;cursor:pointer">⏹ Stop</button>';
       }
       if(job.errors && job.errors.length){
         html += '<div style="margin-top:4px;font-size:12px;color:#ef4444">' + job.errors.join(', ') + '</div>';
@@ -218,6 +218,12 @@ async function refreshScrapeStatus(){
 }
 refreshScrapeStatus();
 setInterval(refreshScrapeStatus, 2000);
+
+// Event delegation for stop buttons (avoids inline onclick escaping issues)
+document.addEventListener('click', function(e){
+  const btn = e.target.closest('.stop-btn');
+  if(btn) stopScrape(btn.dataset.niche);
+});
 
 async function loadCampaigns(){
   try{
@@ -271,7 +277,7 @@ async function refreshLogs(){
 
     const container = document.getElementById('api-log');
     if(!d.length){
-      container.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px 0">En attente d\'activité...</div>';
+      container.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px 0">En attente d\\'activité...</div>';
       setText('log-count', '0 req/min');
       return;
     }
@@ -318,7 +324,7 @@ setTimeout(async () => {
     if(h && h.status === 'ok') {
       title = 'Erreur de connexion Supabase';
       detail = 'Le serveur est en ligne mais la base de données Supabase est inaccessible.\n';
-      detail += 'Vérifie que SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont corrects dans les variables d\'environnement Render.';
+      detail += 'Vérifie que SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont corrects dans les variables d\\'environnement Render.';
       if(lastError) detail += '\n\nDernière erreur : ' + lastError;
     } else {
       title = 'Serveur anormal';
@@ -327,7 +333,7 @@ setTimeout(async () => {
   } catch(e) {
     title = 'Serveur indisponible';
     detail = 'Le backend ne répond pas.\n';
-    detail += 'L\'instance Render est peut-être en redémarrage, ou le port est incorrect.\n';
+    detail += 'L\\'instance Render est peut-être en redémarrage, ou le port est incorrect.\n';
     detail += 'Vérifie les logs de déploiement sur dashboard.render.com.';
     if(lastError) detail += '\n\nDernière erreur : ' + lastError;
   }
