@@ -78,7 +78,9 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
   <div style="font-size:13px;color:#94a3b8;margin-bottom:12px">Scraping en direct</div>
 
   <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-    <input id="scrape-niche" placeholder="Niche (ex: avocat)" style="width:180px;padding:8px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px">
+    <select id="scrape-niche" style="width:200px;padding:8px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px">
+      <option value="">Chargement...</option>
+    </select>
     <input id="scrape-limit" type="number" value="2000" style="width:100px;padding:8px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px">
     <button class="btn btn-green" onclick="startScrape()" style="padding:8px 16px;border-radius:8px;border:none;font-size:14px;font-weight:500;cursor:pointer;background:#22c55e;color:#fff">▶ Lancer</button>
   </div>
@@ -165,17 +167,31 @@ async function refreshScrapeStatus(){
 refreshScrapeStatus();
 setInterval(refreshScrapeStatus, 2000);
 
+async function loadCampaigns(){
+  try{
+    const r = await fetch('/api/scrape/campaigns');
+    const d = await r.json();
+    const sel = document.getElementById('scrape-niche');
+    sel.innerHTML = '<option value="">Sélectionne une niche...</option>';
+    for(const c of d.campaigns){
+      sel.innerHTML += '<option value="' + c.niche + '">' + c.niche + ' (' + c.cities.length + ' villes, priorité ' + c.priority + ')</option>';
+    }
+  }catch(e){}
+}
+
 async function startScrape(){
-  const niche = document.getElementById('scrape-niche').value.trim().toLowerCase();
+  const sel = document.getElementById('scrape-niche');
+  const niche = sel.value;
   if(!niche) return;
   const limit = parseInt(document.getElementById('scrape-limit').value) || 2000;
   await fetch('/api/scrape/start', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({niche, limit})
   });
-  document.getElementById('scrape-niche').value = '';
+  sel.value = '';
   refreshScrapeStatus();
 }
+loadCampaigns();
 
 async function stopScrape(niche){
   await fetch('/api/scrape/stop', {
@@ -256,6 +272,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_scrape_status()
         elif self.path == "/api/scrape/logs":
             self._handle_scrape_logs()
+        elif self.path == "/api/scrape/campaigns":
+            self._handle_scrape_campaigns()
         elif self.path == "/book":
             self._handle_tracking("book")
         elif self.path == "/testimonial":
@@ -398,6 +416,26 @@ window.location.href='{redirect_url}';
             params = urllib.parse.parse_qs(qs)
             limit = int(params.get("limit", ["100"])[0])
             self._json(get_api_logs(limit))
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
+    def _handle_scrape_campaigns(self):
+        try:
+            sb = get_supabase()
+            result = (
+                sb.table("campaign_queue")
+                .select("niche, city, priority")
+                .eq("status", "pending")
+                .order("priority")
+                .execute()
+            )
+            groups = {}
+            for r in result.data:
+                n = r["niche"]
+                if n not in groups:
+                    groups[n] = {"niche": n, "cities": [], "priority": r.get("priority", 99)}
+                groups[n]["cities"].append(r["city"])
+            self._json({"campaigns": list(groups.values())})
         except Exception as e:
             self._json({"error": str(e)}, 500)
 
