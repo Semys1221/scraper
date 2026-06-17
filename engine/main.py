@@ -51,7 +51,19 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
 </style>
 </head>
 <body>
-<div id="loading-overlay"><div class="spinner"></div><span>Loading...</span></div>
+<div id="loading-overlay">
+  <div id="loading-state" style="display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px">
+    <div class="spinner" style="width:40px;height:40px;border-width:4px"></div>
+    <span style="font-size:18px;color:#94a3b8">Loading...</span>
+  </div>
+  <div id="error-state" style="display:none;text-align:center;max-width:520px">
+    <div style="font-size:44px;margin-bottom:12px">⚠️</div>
+    <div id="error-title" style="font-size:20px;color:#ef4444;font-weight:600;margin-bottom:8px"></div>
+    <div id="error-detail" style="font-size:13px;color:#94a3b8;margin-bottom:16px;line-height:1.5;white-space:pre-wrap"></div>
+    <button onclick="location.reload()" style="padding:10px 24px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:14px;cursor:pointer">🔄 Réessayer</button>
+    <div id="error-logs" style="margin-top:16px;text-align:left;background:#1e293b;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;max-height:140px;overflow-y:auto;color:#64748b"></div>
+  </div>
+</div>
 
 <div class="nav">
   <a href="/dashboard">Dashboard</a>
@@ -131,6 +143,7 @@ function setHTML(id, html){
 // --- Stats ---
 const MAX = 20000;
 let statsOk = false;
+let lastError = '';
 
 async function refresh(){
   try{
@@ -153,6 +166,7 @@ async function refresh(){
     document.getElementById('loading-overlay').classList.add('hidden');
     setText('updated', 'Dernière mise à jour: ' + new Date().toLocaleTimeString());
   }catch(e){
+    lastError = e.message;
     if(!statsOk) return; // keep spinners on first load
     setHTML('niche-rows', '<tr><td colspan="3" style="text-align:center;color:#ef4444;padding:16px">⚠ Erreur: ' + e.message + '</td></tr>');
     setText('updated', 'Erreur: ' + e.message);
@@ -287,6 +301,51 @@ async function refreshLogs(){
 }
 refreshLogs();
 setInterval(refreshLogs, 1000);
+
+// --- 15s timeout: if loading overlay still visible, show crash diagnostic ---
+setTimeout(async () => {
+  const overlay = document.getElementById('loading-overlay');
+  if(!overlay || overlay.classList.contains('hidden')) return;
+
+  document.getElementById('loading-state').style.display = 'none';
+  document.getElementById('error-state').style.display = 'block';
+
+  let title = 'Impossible de charger le dashboard';
+  let detail = lastError || 'Le serveur ne répond pas après 15 secondes.';
+
+  try {
+    const h = await fetchJSON('/api/health', {}, 5000);
+    if(h && h.status === 'ok') {
+      title = 'Erreur de connexion Supabase';
+      detail = 'Le serveur est en ligne mais la base de données Supabase est inaccessible.\n';
+      detail += 'Vérifie que SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont corrects dans les variables d\'environnement Render.';
+      if(lastError) detail += '\n\nDernière erreur : ' + lastError;
+    } else {
+      title = 'Serveur anormal';
+      detail = 'Le endpoint /api/health a répondu de façon imprévue.';
+    }
+  } catch(e) {
+    title = 'Serveur indisponible';
+    detail = 'Le backend ne répond pas.\n';
+    detail += 'L\'instance Render est peut-être en redémarrage, ou le port est incorrect.\n';
+    detail += 'Vérifie les logs de déploiement sur dashboard.render.com.';
+    if(lastError) detail += '\n\nDernière erreur : ' + lastError;
+  }
+
+  document.getElementById('error-title').textContent = title;
+  document.getElementById('error-detail').textContent = detail;
+
+  try {
+    const logs = await fetchJSON('/api/scrape/logs?limit=10', {}, 3000);
+    if(logs && !logs.error && logs.length) {
+      let logHtml = '<div style="font-weight:600;margin-bottom:6px;color:#94a3b8">Dernière activité API scraper :</div>';
+      for(const l of logs.slice(-5).reverse()) {
+        logHtml += '<div style="padding:2px 0">' + new Date(l.ts*1000).toLocaleTimeString() + ' | <span style="color:' + ({request:'#3b82f6',response:'#22c55e',rate_limit:'#eab308',error:'#ef4444'}[l.type]||'#64748b') + '">' + l.type + '</span> | ' + l.niche + '/' + l.city + ' | ' + l.detail + '</div>';
+      }
+      document.getElementById('error-logs').innerHTML = logHtml;
+    }
+  } catch(e) {}
+}, 15000);
 </script>
 </body>
 </html>"""
