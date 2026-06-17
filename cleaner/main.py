@@ -167,103 +167,115 @@ def _cleaner_loop():
 
 # ── Dashboard Web Server ──────────────────────────────────────────────────────
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-
-app = FastAPI(title="Cleaner Dashboard", docs_url=None, redoc_url=None)
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
-START_TIME = time.time()
+_web_app = None
+_web_templates = None
+_WEB_START_TIME = None
 
 
-@app.get("/api/health", include_in_schema=False)
-@app.head("/api/health", include_in_schema=False)
-async def api_health():
-    return {"status": "ok", "uptime": int(time.time() - START_TIME)}
+def _get_web_app():
+    global _web_app, _web_templates, _WEB_START_TIME
+    if _web_app is not None:
+        return _web_app, _web_templates
 
+    from fastapi import FastAPI, Request
+    from fastapi.responses import HTMLResponse
+    from fastapi.templating import Jinja2Templates
 
-@app.get("/api/stats")
-async def api_stats():
-    now = datetime.now(timezone.utc)
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    app = FastAPI(title="Cleaner Dashboard", docs_url=None, redoc_url=None)
+    templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+    _WEB_START_TIME = time.time()
 
-    cold_total = _safe_count("cold_leads")
-    cold_today = _safe_count("cold_leads", today)
-    cold_week = _safe_count("cold_leads", week)
-    cold_month = _safe_count("cold_leads", month)
+    @app.get("/health", include_in_schema=False)
+    @app.head("/health", include_in_schema=False)
+    @app.get("/api/health", include_in_schema=False)
+    @app.head("/api/health", include_in_schema=False)
+    async def api_health():
+        return {"status": "ok", "uptime": int(time.time() - _WEB_START_TIME)}
 
-    clean_total = _safe_count("clean_leads")
-    clean_today = _safe_count("clean_leads", today)
-    clean_week = _safe_count("clean_leads", week)
-    clean_month = _safe_count("clean_leads", month)
+    @app.get("/api/stats", include_in_schema=False)
+    async def api_stats():
+        now = datetime.now(timezone.utc)
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
 
-    usage = _safe_fetch("outscraper_usage", "places_count, contacts_count, leads_stored", None, 99999)
-    total_places = sum(r.get("places_count", 0) or 0 for r in usage)
-    total_contacts = sum(r.get("contacts_count", 0) or 0 for r in usage)
-    total_stored = sum(r.get("leads_stored", 0) or 0 for r in usage)
+        cold_total = _safe_count("cold_leads")
+        cold_today = _safe_count("cold_leads", today)
+        cold_week = _safe_count("cold_leads", week)
+        cold_month = _safe_count("cold_leads", month)
 
-    active = _safe_count("scrape_campaigns")
+        clean_total = _safe_count("clean_leads")
+        clean_today = _safe_count("clean_leads", today)
+        clean_week = _safe_count("clean_leads", week)
+        clean_month = _safe_count("clean_leads", month)
 
-    return {
-        "cold": {"total": cold_total, "today": cold_today, "week": cold_week, "month": cold_month},
-        "clean": {"total": clean_total, "today": clean_today, "week": clean_week, "month": clean_month},
-        "outscraper": {"totalPlaces": total_places, "totalContacts": total_contacts, "totalStored": total_stored, "apiCalls": len(usage)},
-        "activeCampaigns": active,
-    }
+        usage = _safe_fetch("outscraper_usage", "places_count, contacts_count, leads_stored", None, 99999)
+        total_places = sum(r.get("places_count", 0) or 0 for r in usage)
+        total_contacts = sum(r.get("contacts_count", 0) or 0 for r in usage)
+        total_stored = sum(r.get("leads_stored", 0) or 0 for r in usage)
 
+        active = _safe_count("scrape_campaigns")
 
-@app.get("/api/activity")
-async def api_activity(since: str | None = None):
-    if not since:
-        since = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+        return {
+            "cold": {"total": cold_total, "today": cold_today, "week": cold_week, "month": cold_month},
+            "clean": {"total": clean_total, "today": clean_today, "week": clean_week, "month": clean_month},
+            "outscraper": {"totalPlaces": total_places, "totalContacts": total_contacts, "totalStored": total_stored, "apiCalls": len(usage)},
+            "activeCampaigns": active,
+        }
 
-    events = []
+    @app.get("/api/activity", include_in_schema=False)
+    async def api_activity(since: str | None = None):
+        if not since:
+            since = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
 
-    clean_data = _safe_fetch("clean_leads", "id, email, first_name, last_name, company_name, profession, niche, status, created_at", since, 50)
-    for r in clean_data:
-        name = f"{r.get('first_name', '') or ''} {r.get('last_name', '') or ''}".strip() or r.get("email", "")
-        events.append({
-            "id": f"clean-{r['id']}",
-            "type": "lead_cleaned",
-            "title": name,
-            "subtitle": f"{r.get('company_name', '') or ''} — {r.get('profession', '') or r.get('niche', '') or ''}",
-            "timestamp": r.get("created_at", ""),
-        })
+        events = []
 
-    usage_data = _safe_fetch("outscraper_usage", "id, query, location, places_count, contacts_count, leads_stored, execution_time_ms, created_at", since, 20)
-    for r in usage_data:
-        events.append({
-            "id": f"api-{r['id']}",
-            "type": "api_call",
-            "title": f"{r.get('query', '')} @ {r.get('location', '')}",
-            "subtitle": f"{r.get('places_count', 0)} places, {r.get('contacts_count', 0)} contacts, {r.get('leads_stored', 0)} stored",
-            "timestamp": r.get("created_at", ""),
-        })
+        clean_data = _safe_fetch("clean_leads", "id, email, first_name, last_name, company_name, profession, niche, status, created_at", since, 50)
+        for r in clean_data:
+            name = f"{r.get('first_name', '') or ''} {r.get('last_name', '') or ''}".strip() or r.get("email", "")
+            events.append({
+                "id": f"clean-{r['id']}",
+                "type": "lead_cleaned",
+                "title": name,
+                "subtitle": f"{r.get('company_name', '') or ''} — {r.get('profession', '') or r.get('niche', '') or ''}",
+                "timestamp": r.get("created_at", ""),
+            })
 
-    campaign_data = _safe_fetch("scrape_campaigns", "id, name, keywords, status, leads_found, leads_cleaned, created_at", since, 10)
-    for r in campaign_data:
-        events.append({
-            "id": f"cmp-{r['id']}",
-            "type": "campaign",
-            "title": r.get("name", ""),
-            "subtitle": f"{r.get('leads_found', 0)} found, {r.get('leads_cleaned', 0)} cleaned — {r.get('status', '')}",
-            "timestamp": r.get("created_at", ""),
-        })
+        usage_data = _safe_fetch("outscraper_usage", "id, query, location, places_count, contacts_count, leads_stored, execution_time_ms, created_at", since, 20)
+        for r in usage_data:
+            events.append({
+                "id": f"api-{r['id']}",
+                "type": "api_call",
+                "title": f"{r.get('query', '')} @ {r.get('location', '')}",
+                "subtitle": f"{r.get('places_count', 0)} places, {r.get('contacts_count', 0)} contacts, {r.get('leads_stored', 0)} stored",
+                "timestamp": r.get("created_at", ""),
+            })
 
-    events.sort(key=lambda e: e["timestamp"], reverse=True)
-    return {"events": events[:100], "serverTime": datetime.now(timezone.utc).isoformat()}
+        campaign_data = _safe_fetch("scrape_campaigns", "id, name, keywords, status, leads_found, leads_cleaned, created_at", since, 10)
+        for r in campaign_data:
+            events.append({
+                "id": f"cmp-{r['id']}",
+                "type": "campaign",
+                "title": r.get("name", ""),
+                "subtitle": f"{r.get('leads_found', 0)} found, {r.get('leads_cleaned', 0)} cleaned — {r.get('status', '')}",
+                "timestamp": r.get("created_at", ""),
+            })
 
+        events.sort(key=lambda e: e["timestamp"], reverse=True)
+        return {"events": events[:100], "serverTime": datetime.now(timezone.utc).isoformat()}
 
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-@app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
-async def dashboard(request: Request):
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+    async def dashboard(request: Request):
+        return templates.TemplateResponse("dashboard.html", {"request": request})
+
+    _web_app = app
+    _web_templates = templates
+    return app, templates
 
 
 def _start_web():
+    app, _ = _get_web_app()
     import uvicorn
     log.info("Dashboard web server on port %s", PORT)
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
