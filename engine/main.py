@@ -323,19 +323,19 @@ setTimeout(async () => {
     const h = await fetchJSON('/api/health', {}, 5000);
     if(h && h.status === 'ok') {
       title = 'Erreur de connexion Supabase';
-      detail = 'Le serveur est en ligne mais la base de données Supabase est inaccessible.\n';
+      detail = 'Le serveur est en ligne mais la base de données Supabase est inaccessible.\\n';
       detail += `Vérifie que SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY sont corrects dans les variables d'environnement Render.`;
-      if(lastError) detail += '\n\nDernière erreur : ' + lastError;
+      if(lastError) detail += '\\n\\nDernière erreur : ' + lastError;
     } else {
       title = 'Serveur anormal';
       detail = 'Le endpoint /api/health a répondu de façon imprévue.';
     }
   } catch(e) {
     title = 'Serveur indisponible';
-    detail = 'Le backend ne répond pas.\n';
-    detail += `L'instance Render est peut-être en redémarrage, ou le port est incorrect.\n`;
+    detail = 'Le backend ne répond pas.\\n';
+    detail += `L'instance Render est peut-être en redémarrage, ou le port est incorrect.\\n`;
     detail += 'Vérifie les logs de déploiement sur dashboard.render.com.';
-    if(lastError) detail += '\n\nDernière erreur : ' + lastError;
+    if(lastError) detail += '\\n\\nDernière erreur : ' + lastError;
   }
 
   document.getElementById('error-title').textContent = title;
