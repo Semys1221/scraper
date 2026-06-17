@@ -5,6 +5,7 @@ import time
 import queue
 import threading
 import argparse
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -135,7 +136,29 @@ def _auto_discover_loop():
         time.sleep(60)
 
 
-# --- Parsiing ---
+# --- API log buffer ---
+_api_log = deque(maxlen=500)
+_api_log_lock = threading.Lock()
+
+
+def _log_api(niche: str, city: str, type_: str, detail: str = ""):
+    entry = {
+        "ts": time.time(),
+        "niche": niche,
+        "city": city,
+        "type": type_,
+        "detail": detail,
+    }
+    with _api_log_lock:
+        _api_log.append(entry)
+
+
+def get_api_logs(limit: int = 100):
+    with _api_log_lock:
+        return list(_api_log)[-limit:]
+
+
+# --- Parsing ---
 def _parse_keywords(text: str | None) -> list[str]:
     if not text:
         return []
@@ -164,13 +187,16 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
     skip = 0
 
     while True:
+        query = f"{niche} {city}"
         params = {
-            "query": f"{niche} {city}",
+            "query": query,
             "limit": BATCH_SIZE,
             "skip": skip,
             "language": "fr",
             "enrichment": "contacts_n_leads",
         }
+
+        _log_api(niche, city, "request", f"skip={skip} query={query}")
 
         try:
             resp = requests.get(
@@ -180,19 +206,23 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
                 timeout=60,
             )
         except requests.RequestException as e:
+            _log_api(niche, city, "error", f"Réseau: {e}")
             print(f"[ENGINE] ⚠ Réseau: {e}")
             time.sleep(RETRY_DELAY)
             continue
 
         if resp.status_code == 429:
+            _log_api(niche, city, "rate_limit", f"429, pause {RETRY_DELAY}s")
             print(f"[ENGINE] ⏳ Rate limit (429), pause {RETRY_DELAY}s")
             time.sleep(RETRY_DELAY)
             continue
 
         if resp.status_code == 404:
+            _log_api(niche, city, "done", f"404 — ville épuisée")
             break
 
         if resp.status_code not in (200, 202):
+            _log_api(niche, city, "error", f"HTTP {resp.status_code}: {resp.text[:100]}")
             print(f"[ENGINE] ⚠ Erreur {resp.status_code}: {resp.text[:200]}")
             time.sleep(RETRY_DELAY)
             continue
@@ -202,9 +232,11 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
         if data.get("status") == "Pending":
             poll_url = data.get("results_location")
             if not poll_url:
+                _log_api(niche, city, "error", "Pending sans results_location")
                 print(f"[ENGINE] ⏳ Requête en attente sans results_location, pause 5s")
                 time.sleep(5)
                 continue
+            _log_api(niche, city, "pending", "Polling résultats...")
             print(f"[ENGINE] Requête en attente, polling...")
             for _ in range(60):
                 time.sleep(3)
@@ -216,6 +248,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
                     data = poll_data
                     break
             else:
+                _log_api(niche, city, "error", "Timeout polling Outscraper")
                 print(f"[ENGINE] Timeout en attente des résultats Outscraper")
                 continue
 
@@ -223,21 +256,26 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
         if items and isinstance(items, list) and len(items) > 0 and isinstance(items[0], list):
             items = items[0]
         if not items:
+            _log_api(niche, city, "done", f"0 résultats skip={skip}")
             print(f"[ENGINE] 0 résultats à skip {skip}, ville épuisée")
             break
 
         inserted = 0
+        batch_filtered = 0
         for entry in items:
             place_id = str(entry.get("place_id", entry.get("id", str(uuid.uuid4()))))
             email = (entry.get("email") or entry.get("email_1") or "").lower().strip()
             if not email:
+                batch_filtered += 1
                 continue
             company_name = entry.get("name") or entry.get("company_name", "") or ""
             if not _matches_keywords(company_name, email, include_kw, exclude_kw):
                 total_filtered += 1
+                batch_filtered += 1
                 continue
             if not entry.get("phone"):
                 total_filtered += 1
+                batch_filtered += 1
                 continue
 
             lead = {
@@ -258,10 +296,13 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
             except Exception as e:
                 err = str(e).lower()
                 if "duplicate" not in err and "23505" not in err:
+                    _log_api(niche, city, "error", f"Upsert {email}: {e}")
                     print(f"[ENGINE] ⚠ Erreur upsert {email}: {e}")
 
         total_inserted += inserted
         new_total = total_inserted
+
+        _log_api(niche, city, "response", f"+{inserted} leads (filtrés={batch_filtered})")
 
         if inserted > 0:
             prev = new_total - inserted
@@ -281,6 +322,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
         skip += BATCH_SIZE
 
     sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
+    _log_api(niche, city, "done", f"{total_inserted} leads, {total_filtered} filtrés")
     print(f"[ENGINE] ✅ {niche} / {city} terminée ({total_inserted} leads, {total_filtered} filtrés)")
     return total_inserted
 

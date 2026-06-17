@@ -9,7 +9,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import requests
-from engine.scraper import start_scrape, stop_scrape, get_scrape_status, start_auto_discover
+from engine.scraper import start_scrape, stop_scrape, get_scrape_status, get_api_logs, start_auto_discover
 from database.config import (
     get_supabase,
 )
@@ -84,6 +84,16 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
   </div>
 
   <div id="scrape-jobs"></div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div style="font-size:13px;color:#94a3b8">Activité API en direct</div>
+    <span id="log-count" style="font-size:11px;color:#64748b">0 req/min</span>
+  </div>
+  <div id="api-log" style="background:#0f172a;border-radius:8px;padding:8px;height:240px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.6">
+    <div style="color:#64748b;text-align:center;padding:40px 0">En attente d'activité...</div>
+  </div>
 </div>
 
 <div class="footer" id="updated">Dernière mise à jour: -</div>
@@ -174,6 +184,50 @@ async function stopScrape(niche){
   });
   refreshScrapeStatus();
 }
+
+// --- API logs (1s refresh) ---
+const logColors = {request:'#3b82f6', response:'#22c55e', rate_limit:'#eab308', error:'#ef4444', pending:'#a855f7', done:'#64748b'};
+const logLabels = {request:'REQ', response:'RÉP', rate_limit:'LIMITE', error:'ERREUR', pending:'ATTENTE', done:'FIN'};
+const logIcons = {request:'→', response:'←', rate_limit:'⏳', error:'✕', pending:'⏰', done:'✓'};
+let prevLogs = [];
+
+async function refreshLogs(){
+  try{
+    const r = await fetch('/api/scrape/logs?limit=50');
+    const logs = await r.json();
+    if(JSON.stringify(logs) === JSON.stringify(prevLogs)) return;
+    prevLogs = logs;
+
+    const container = document.getElementById('api-log');
+    if(!logs.length){
+      container.innerHTML = '<div style="color:#64748b;text-align:center;padding:40px 0">En attente d\'activité...</div>';
+      document.getElementById('log-count').textContent = '0 req/min';
+      return;
+    }
+
+    const now = Date.now() / 1000;
+    const recent = logs.filter(l => now - l.ts < 60).length;
+    document.getElementById('log-count').textContent = recent + ' req/min';
+
+    let html = '';
+    for(const l of logs.slice(-50).reverse()){
+      const color = logColors[l.type] || '#64748b';
+      const label = logLabels[l.type] || l.type;
+      const icon = logIcons[l.type] || '•';
+      const time = new Date(l.ts * 1000).toLocaleTimeString();
+      html += '<div style="display:flex;gap:8px;padding:1px 0">';
+      html += '<span style="color:#64748b;flex-shrink:0">' + time + '</span>';
+      html += '<span style="color:' + color + ';flex-shrink:0;font-weight:600;width:52px">' + icon + ' ' + label + '</span>';
+      html += '<span style="color:#94a3b8;flex-shrink:0">' + l.niche + '/' + l.city + '</span>';
+      html += '<span style="color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + l.detail + '</span>';
+      html += '</div>';
+    }
+    container.innerHTML = html;
+    container.scrollTop = 0;
+  }catch(e){}
+}
+refreshLogs();
+setInterval(refreshLogs, 1000);
 </script>
 </body>
 </html>"""
@@ -200,6 +254,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_stats()
         elif self.path == "/api/scrape/status":
             self._handle_scrape_status()
+        elif self.path == "/api/scrape/logs":
+            self._handle_scrape_logs()
         elif self.path == "/book":
             self._handle_tracking("book")
         elif self.path == "/testimonial":
@@ -333,6 +389,15 @@ window.location.href='{redirect_url}';
             if not niche:
                 return self._json({"error": "niche requis"}, 400)
             self._json(stop_scrape(niche))
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
+    def _handle_scrape_logs(self):
+        try:
+            qs = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(qs)
+            limit = int(params.get("limit", ["100"])[0])
+            self._json(get_api_logs(limit))
         except Exception as e:
             self._json({"error": str(e)}, 500)
 
