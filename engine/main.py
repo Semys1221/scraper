@@ -44,9 +44,14 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
 .spinner{display:inline-block;width:28px;height:28px;border:3px solid #334155;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite}
 .spinner-sm{width:18px;height:18px;border-width:2px}
 @keyframes spin{to{transform:rotate(360deg)}}
+#loading-overlay{position:fixed;inset:0;background:#0f172a;display:flex;align-items:center;justify-content:center;z-index:999;flex-direction:column;gap:16px;transition:opacity .4s}
+#loading-overlay.hidden{opacity:0;pointer-events:none}
+#loading-overlay .spinner{width:40px;height:40px;border-width:4px}
+#loading-overlay span{font-size:18px;color:#94a3b8}
 </style>
 </head>
 <body>
+<div id="loading-overlay"><div class="spinner"></div><span>Loading...</span></div>
 
 <div class="nav">
   <a href="/dashboard">Dashboard</a>
@@ -145,6 +150,7 @@ async function refresh(){
       rows += '<tr><td>' + n.niche + '</td><td>' + n.total + '</td><td><div class="bar"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div></td></tr>';
     }
     setHTML('niche-rows', rows || '<tr><td colspan="3" style="text-align:center;color:#64748b;padding:16px">Aucune donnée</td></tr>');
+    document.getElementById('loading-overlay').classList.add('hidden');
     setText('updated', 'Dernière mise à jour: ' + new Date().toLocaleTimeString());
   }catch(e){
     if(!statsOk) return; // keep spinners on first load
