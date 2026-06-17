@@ -10,8 +10,11 @@ if "cleaner" in service:
     from cleaner.main import main
     main()
 else:
-    from engine.main import auto_run, start_http, _cleaner_keep_alive
+    from engine.main import start_http, _cleaner_keep_alive
+    from engine.scraper import start_auto_discover
     threading.Thread(target=_cleaner_keep_alive, daemon=True).start()
+    start_auto_discover()
     t = threading.Thread(target=start_http, daemon=True)
     t.start()
-    auto_run()
+    while True:
+        time.sleep(60)

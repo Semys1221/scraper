@@ -12,8 +12,6 @@ import requests
 from engine.scraper import start_scrape, stop_scrape, get_scrape_status, start_auto_discover
 from database.config import (
     get_supabase,
-    get_smartlead_analytics,
-    save_campaign_analytics,
 )
 
 PORT = int(os.getenv("PORT", 8001))
@@ -357,25 +355,8 @@ def start_http():
     server.serve_forever()
 
 
-def _analytics_loop():
-    while True:
-        try:
-            sb = get_supabase()
-            campaigns = sb.table("campaign_queue").select("smartlead_campaign_id, niche").not_.is_("smartlead_campaign_id", "null").execute()
-            for c in campaigns.data:
-                cid = c["smartlead_campaign_id"]
-                data = get_smartlead_analytics(cid)
-                if data:
-                    save_campaign_analytics(cid, data)
-            print(f"[ANALYTICS] Updated {len(campaigns.data)} campaigns")
-        except Exception as e:
-            print(f"[ANALYTICS] Error: {e}")
-        time.sleep(3600)
-
-
 if __name__ == "__main__":
     threading.Thread(target=_cleaner_keep_alive, daemon=True).start()
-    threading.Thread(target=_analytics_loop, daemon=True).start()
     start_auto_discover()
     t = threading.Thread(target=start_http, daemon=True)
     t.start()
