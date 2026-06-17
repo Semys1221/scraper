@@ -41,6 +41,9 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
 .nav{display:flex;gap:16px;margin-bottom:24px}
 .nav a{color:#3b82f6;text-decoration:none;padding:8px 16px;border-radius:8px;border:1px solid #334155;font-size:14px}
 .nav a:hover{background:#1e293b}
+.spinner{display:inline-block;width:28px;height:28px;border:3px solid #334155;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite}
+.spinner-sm{width:18px;height:18px;border-width:2px}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -52,22 +55,22 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
 <h1>Scraper Dashboard</h1>
 
 <div class="grid" id="campaigns">
-  <div class="card"><div class="label">Campagnes faites</div><div class="value green" id="done">-</div></div>
-  <div class="card"><div class="label">En cours</div><div class="value blue" id="scraping">-</div></div>
-  <div class="card"><div class="label">En attente</div><div class="value yellow" id="pending">-</div></div>
+  <div class="card"><div class="label">Campagnes faites</div><div class="value green" id="done"><div class="spinner spinner-sm"></div></div></div>
+  <div class="card"><div class="label">En cours</div><div class="value blue" id="scraping"><div class="spinner spinner-sm"></div></div></div>
+  <div class="card"><div class="label">En attente</div><div class="value yellow" id="pending"><div class="spinner spinner-sm"></div></div></div>
 </div>
 
 <div class="grid" id="leads">
-  <div class="card"><div class="label">Leads bruts</div><div class="value orange" id="raw">-</div></div>
-  <div class="card"><div class="label">Nettoyés</div><div class="value purple" id="cleaned">-</div></div>
-  <div class="card"><div class="label">Smartlead</div><div class="value green" id="smartlead">-</div></div>
+  <div class="card"><div class="label">Leads bruts</div><div class="value orange" id="raw"><div class="spinner spinner-sm"></div></div></div>
+  <div class="card"><div class="label">Nettoyés</div><div class="value purple" id="cleaned"><div class="spinner spinner-sm"></div></div></div>
+  <div class="card"><div class="label">Smartlead</div><div class="value green" id="smartlead"><div class="spinner spinner-sm"></div></div></div>
 </div>
 
 <div class="card">
   <div style="font-size:13px;color:#94a3b8;margin-bottom:12px">Leads par niche</div>
   <table class="niche-table">
     <thead><tr><th>Niche</th><th>Total</th><th>Progression</th></tr></thead>
-    <tbody id="niche-rows"></tbody>
+    <tbody id="niche-rows"><tr><td colspan="3" style="text-align:center;padding:16px;color:#64748b"><div class="spinner spinner-sm" style="margin:0 auto"></div></td></tr></tbody>
   </table>
 </div>
 
