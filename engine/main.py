@@ -9,12 +9,14 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 import requests
-from engine.scraper import auto_run
+from engine.scraper import start_scrape, stop_scrape, get_scrape_status, start_auto_discover
 from database.config import (
     get_supabase,
     GEMINI_API_KEY,
     update_smartlead_sequences,
     create_smartlead_campaign,
+    get_smartlead_analytics,
+    save_campaign_analytics,
 )
 
 PORT = int(os.getenv("PORT", 8001))
@@ -75,6 +77,18 @@ h1{font-size:24px;font-weight:600;margin-bottom:24px;color:#f8fafc}
   </table>
 </div>
 
+<div class="card">
+  <div style="font-size:13px;color:#94a3b8;margin-bottom:12px">Scraping en direct</div>
+
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+    <input id="scrape-niche" placeholder="Niche (ex: avocat)" style="width:180px;padding:8px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px">
+    <input id="scrape-limit" type="number" value="2000" style="width:100px;padding:8px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px">
+    <button class="btn btn-green" onclick="startScrape()" style="padding:8px 16px;border-radius:8px;border:none;font-size:14px;font-weight:500;cursor:pointer;background:#22c55e;color:#fff">▶ Lancer</button>
+  </div>
+
+  <div id="scrape-jobs"></div>
+</div>
+
 <div class="footer" id="updated">Dernière mise à jour: -</div>
 
 <script>
@@ -101,6 +115,68 @@ async function refresh(){
 }
 refresh();
 setInterval(refresh, 5000);
+
+// --- Scraping controls ---
+async function refreshScrapeStatus(){
+  try{
+    const r = await fetch('/api/scrape/status');
+    const jobs = await r.json();
+    const container = document.getElementById('scrape-jobs');
+    const entries = Object.entries(jobs);
+    if(!entries.length){
+      container.innerHTML = '<div style="color:#64748b;font-size:13px">Aucun scraping en cours</div>';
+      return;
+    }
+    let html = '';
+    for(const [niche, job] of entries){
+      const pct = job.target > 0 ? Math.min(100, (job.total / job.target * 100)).toFixed(1) : 0;
+      const statusColors = {queued:'#eab308', running:'#3b82f6', done:'#22c55e', error:'#ef4444', stopping:'#f97316'};
+      const color = statusColors[job.status] || '#64748b';
+      const statusLabel = {queued:'En attente', running:'En cours', done:'Terminé', error:'Erreur', stopping:'Arrêt en cours'};
+      html += '<div style="background:#0f172a;border-radius:8px;padding:12px;margin-bottom:8px;border:1px solid #334155">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+      html += '<strong style="color:#f8fafc">' + niche + '</strong>';
+      html += '<span style="font-size:12px;color:' + color + ';font-weight:500">' + (statusLabel[job.status] || job.status) + '</span>';
+      html += '</div>';
+      html += '<div style="display:flex;justify-content:space-between;font-size:12px;color:#94a3b8;margin-bottom:4px">';
+      html += '<span>' + job.total + ' / ' + job.target + ' leads</span>';
+      html += '<span>' + job.cities_done + '/' + job.cities_total + ' villes</span>';
+      if(job.current_city) html += '<span>📍 ' + job.current_city + '</span>';
+      html += '</div>';
+      html += '<div class="bar"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>';
+      if(job.status === 'running' || job.status === 'queued'){
+        html += '<button onclick="stopScrape(\'' + niche + '\')" style="margin-top:8px;padding:4px 12px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;font-size:12px;cursor:pointer">⏹ Stop</button>';
+      }
+      if(job.errors && job.errors.length){
+        html += '<div style="margin-top:4px;font-size:12px;color:#ef4444">' + job.errors.join(', ') + '</div>';
+      }
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  }catch(e){}
+}
+refreshScrapeStatus();
+setInterval(refreshScrapeStatus, 2000);
+
+async function startScrape(){
+  const niche = document.getElementById('scrape-niche').value.trim().toLowerCase();
+  if(!niche) return;
+  const limit = parseInt(document.getElementById('scrape-limit').value) || 2000;
+  await fetch('/api/scrape/start', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({niche, limit})
+  });
+  document.getElementById('scrape-niche').value = '';
+  refreshScrapeStatus();
+}
+
+async function stopScrape(niche){
+  await fetch('/api/scrape/stop', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({niche})
+  });
+  refreshScrapeStatus();
+}
 </script>
 </body>
 </html>"""
@@ -351,6 +427,8 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_html(TEMPLATES_HTML)
         elif self.path == "/api/stats":
             self._handle_stats()
+        elif self.path == "/api/scrape/status":
+            self._handle_scrape_status()
         elif self.path == "/api/templates":
             self._handle_get_templates()
         elif self.path == "/book":
@@ -370,6 +448,10 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_sync_smartlead()
         elif self.path == "/api/gemini":
             self._handle_gemini()
+        elif self.path == "/api/scrape/start":
+            self._handle_scrape_start()
+        elif self.path == "/api/scrape/stop":
+            self._handle_scrape_stop()
         else:
             self.send_response(404)
             self.end_headers()
@@ -457,6 +539,37 @@ window.location.href='{redirect_url}';
                 "leads": {"raw": 0, "cleaned": leads_cleaned, "smartlead": leads_smartlead},
                 "by_niche": by_niche,
             })
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
+    def _handle_scrape_status(self):
+        try:
+            self._json(get_scrape_status())
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
+    def _handle_scrape_start(self):
+        try:
+            body = _get_json_body(self)
+            niche = body.get("niche", "").strip().lower()
+            if not niche:
+                return self._json({"error": "niche requis"}, 400)
+            limit = body.get("limit", 20000)
+            result = start_scrape(niche, limit)
+            if "error" in result:
+                self._json(result, 409)
+            else:
+                self._json(result)
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
+    def _handle_scrape_stop(self):
+        try:
+            body = _get_json_body(self)
+            niche = body.get("niche", "").strip().lower()
+            if not niche:
+                return self._json({"error": "niche requis"}, 400)
+            self._json(stop_scrape(niche))
         except Exception as e:
             self._json({"error": str(e)}, 500)
 
@@ -639,8 +752,28 @@ def start_http():
     server.serve_forever()
 
 
+def _analytics_loop():
+    while True:
+        try:
+            sb = get_supabase()
+            campaigns = sb.table("campaign_queue").select("smartlead_campaign_id, niche").not_.is_("smartlead_campaign_id", "null").execute()
+            for c in campaigns.data:
+                cid = c["smartlead_campaign_id"]
+                data = get_smartlead_analytics(cid)
+                if data:
+                    save_campaign_analytics(cid, data)
+            print(f"[ANALYTICS] Updated {len(campaigns.data)} campaigns")
+        except Exception as e:
+            print(f"[ANALYTICS] Error: {e}")
+        time.sleep(3600)
+
+
 if __name__ == "__main__":
     threading.Thread(target=_cleaner_keep_alive, daemon=True).start()
+    threading.Thread(target=_analytics_loop, daemon=True).start()
+    start_auto_discover()
     t = threading.Thread(target=start_http, daemon=True)
     t.start()
-    auto_run()
+    # main thread keeps process alive
+    while True:
+        time.sleep(60)

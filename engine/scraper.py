@@ -2,6 +2,8 @@ import os
 import sys
 import uuid
 import time
+import queue
+import threading
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,13 +21,121 @@ BATCH_SIZE = 100
 LOG_FREQUENCY = 50
 MILESTONES = [100, 500, 1000, 2000, 5000]
 TARGET_PER_NICHE = 20_000
-TARGET_CYCLE = 2000
-TARGET_MAX = 6000
 RETRY_DELAY = 10
 MAX_CONCURRENT = 3
-POLL_INTERVAL = 60
+
+# --- Job queue system ---
+_scrape_queue = queue.Queue()
+_scrape_status = {}
+_status_lock = threading.Lock()
+_worker_thread = None
+_worker_running = False
 
 
+def _update_status(niche: str, **kwargs):
+    with _status_lock:
+        if niche in _scrape_status:
+            _scrape_status[niche].update(kwargs)
+
+
+def _ensure_worker():
+    global _worker_thread, _worker_running
+    if _worker_thread and _worker_thread.is_alive():
+        return
+    _worker_running = True
+    _worker_thread = threading.Thread(target=_worker_loop, daemon=True)
+    _worker_thread.start()
+
+
+def _worker_loop():
+    global _worker_running
+    while _worker_running:
+        try:
+            niche, limit = _scrape_queue.get(timeout=5)
+        except queue.Empty:
+            continue
+
+        _update_status(niche, status="running")
+        try:
+            total = _scrape_niche(niche, limit)
+            _update_status(niche, status="done")
+            print(f"[QUEUE] ✅ {niche}: {total} leads")
+        except Exception as e:
+            _update_status(niche, status="error", errors=[str(e)])
+            print(f"[QUEUE] ❌ {niche}: {e}")
+
+        _scrape_queue.task_done()
+        time.sleep(300)
+        with _status_lock:
+            if niche in _scrape_status and _scrape_status[niche].get("status") in ("done", "error"):
+                del _scrape_status[niche]
+
+
+def start_scrape(niche: str, limit: int = TARGET_PER_NICHE):
+    with _status_lock:
+        existing = _scrape_status.get(niche)
+        if existing and existing.get("status") in ("running", "queued"):
+            return {"error": f"'{niche}' déjà en cours"}
+        _scrape_status[niche] = {
+            "status": "queued",
+            "niche": niche,
+            "total": 0,
+            "target": limit,
+            "current_city": "",
+            "cities_done": 0,
+            "cities_total": 0,
+            "errors": [],
+            "started_at": time.time(),
+        }
+    _scrape_queue.put((niche, limit))
+    _ensure_worker()
+    return {"status": "queued", "niche": niche, "limit": limit}
+
+
+def stop_scrape(niche: str):
+    with _status_lock:
+        if niche in _scrape_status:
+            _scrape_status[niche]["status"] = "stopping"
+            return {"status": "stopping", "niche": niche}
+    return {"error": f"'{niche}' pas en cours"}
+
+
+def get_scrape_status():
+    with _status_lock:
+        return {k: dict(v) for k, v in _scrape_status.items()}
+
+
+def start_auto_discover():
+    t = threading.Thread(target=_auto_discover_loop, daemon=True)
+    t.start()
+
+
+def _auto_discover_loop():
+    while True:
+        try:
+            sb = get_supabase()
+            result = (
+                sb.table("campaign_queue")
+                .select("niche")
+                .eq("status", "pending")
+                .execute()
+            )
+            if result.data:
+                seen = set()
+                for r in result.data:
+                    n = r["niche"]
+                    if n not in seen:
+                        seen.add(n)
+                        with _status_lock:
+                            already = _scrape_status.get(n)
+                            if not already or already.get("status") in ("done", "error", None):
+                                start_scrape(n)
+        except Exception as e:
+            print(f"[AUTO] {e}")
+        time.sleep(60)
+
+
+# --- Parsiing ---
 def _parse_keywords(text: str | None) -> list[str]:
     if not text:
         return []
@@ -43,8 +153,10 @@ def _matches_keywords(company_name: str, email: str, include: list[str], exclude
     return True
 
 
+# --- Scraping ---
 def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
-    print(f"[ENGINE] ▶ Scraping {niche} / {city}")
+    _update_status(niche, current_city=city)
+    print(f"[ENGINE] ▶ {niche} / {city}")
     sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
 
     total_inserted = 0
@@ -195,6 +307,8 @@ def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
     if include_kw or exclude_kw:
         print(f"[ENGINE] Filtres {niche}: include={include_kw}, exclude={exclude_kw}")
 
+    _update_status(niche, cities_total=len(cities.data))
+
     total = 0
     nb_cities = len(cities.data)
     print(f"[ENGINE] 🏁 {niche}: {nb_cities} villes à traiter, target {target} leads")
@@ -203,8 +317,15 @@ def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
         if total >= target:
             print(f"[ENGINE] 🎯 Objectif {target} atteint pour '{niche}' après {idx-1}/{nb_cities} villes")
             break
+
+        with _status_lock:
+            if _scrape_status.get(niche, {}).get("status") == "stopping":
+                print(f"[ENGINE] 🛑 '{niche}' arrêté par l'utilisateur")
+                break
+
         inserted = _scrape_city(sb, niche, camp["city"], camp["id"], include_kw, exclude_kw)
         total += inserted
+        _update_status(niche, total=total, cities_done=idx)
         print(f"[ENGINE] 📈 {niche}: {total}/{target} leads ({idx}/{nb_cities} villes)")
 
     if total > 0:
@@ -212,96 +333,20 @@ def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
     return total
 
 
-def _get_smartlead_count(sb, niche: str) -> int:
-    result = (
-        sb.table("leads")
-        .select("id")
-        .eq("niche", niche)
-        .eq("status", "imported_smartlead")
-        .execute()
-    )
-    return len(result.data)
-
-
-def auto_run():
-    print(f"[ENGINE] Mode auto — {MAX_CONCURRENT} niches concurrentes | cycle={TARGET_CYCLE} max={TARGET_MAX}")
-
-    while True:
-        sb = get_supabase()
-
-        sb.table("campaign_queue").update({"status": "pending"}).eq("status", "scraping").execute()
-
-        result = (
-            sb.table("campaign_queue")
-            .select("niche, priority")
-            .eq("status", "pending")
-            .execute()
-        )
-
-        if not result.data:
-            print(f"[ENGINE] Aucune niche pending. Nouvelle vérification dans {POLL_INTERVAL}s")
-            time.sleep(POLL_INTERVAL)
-            continue
-
-        niche_priorities = {}
-        for r in result.data:
-            n = r["niche"]
-            if n not in niche_priorities:
-                niche_priorities[n] = r.get("priority", 99)
-
-        all_niches = sorted(niche_priorities.keys(), key=lambda n: (niche_priorities.get(n, 99), n))
-
-        priority_niches = [n for n in all_niches if niche_priorities.get(n, 99) <= 3]
-        other_niches = [n for n in all_niches if niche_priorities.get(n, 99) > 3]
-
-        ready = []
-        for n in priority_niches:
-            current = _get_smartlead_count(sb, n)
-            if current >= TARGET_MAX:
-                print(f"[ENGINE] 🎯 {n}: {current}/{TARGET_MAX} — objectif atteint, ignoré")
-                continue
-            per_run = min(TARGET_CYCLE, TARGET_MAX - current)
-            ready.append((n, per_run, current))
-
-        slots_left = MAX_CONCURRENT - len(ready)
-        for n in other_niches[:slots_left]:
-            ready.append((n, TARGET_PER_NICHE, 0))
-
-        if not ready:
-            print(f"[ENGINE] ✅ Tous les objectifs atteints. Nouvelle vérification dans {POLL_INTERVAL}s")
-            time.sleep(POLL_INTERVAL)
-            continue
-
-        print(f"[ENGINE] Niches à traiter: {[(n, t) for n, t, _ in ready]}")
-
-        with ThreadPoolExecutor(max_workers=len(ready)) as executor:
-            futures = {executor.submit(_scrape_niche, n, t): (n, c) for n, t, c in ready}
-            for future in as_completed(futures):
-                n, current = futures[future]
-                try:
-                    total = future.result()
-                    new_total = current + total
-                    print(f"[ENGINE] ✅ {n}: {current} → {new_total}/{TARGET_MAX}")
-                except Exception as e:
-                    print(f"[ENGINE] ❌ {n} en erreur: {e}")
-
-        print(f"[ENGINE] Cycle terminé. Prochaine vérification dans {POLL_INTERVAL}s")
-        time.sleep(POLL_INTERVAL)
-
-
-def main():
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--niche", help="Scraper une niche spécifique (mode manuel)")
-    parser.add_argument("--auto", action="store_true", help="Mode auto: scrappe toutes les niches 3 par 3")
+    parser.add_argument("--niche", help="Scraper une niche spécifique")
+    parser.add_argument("--limit", type=int, default=TARGET_PER_NICHE)
     args = parser.parse_args()
 
     if args.niche:
-        _scrape_niche(args.niche)
-    elif args.auto:
-        auto_run()
+        start_scrape(args.niche, args.limit)
+        _ensure_worker()
+        while True:
+            s = get_scrape_status().get(args.niche, {})
+            print(f"  {s.get('status','?')}: {s.get('total',0)}/{s.get('target','?')} leads")
+            if s.get("status") in ("done", "error"):
+                break
+            time.sleep(5)
     else:
         parser.print_help()
-
-
-if __name__ == "__main__":
-    main()
