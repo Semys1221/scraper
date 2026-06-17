@@ -3,11 +3,12 @@ import sys
 import time
 import logging
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from database.config import get_supabase, send_discord
+from database.config import get_supabase
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [CLEANER] %(message)s")
 log = logging.getLogger(__name__)
@@ -117,26 +118,6 @@ def _process_batch(sb):
     return processed
 
 
-PORT = int(os.getenv("PORT", 8001))
-
-
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(b'{"status":"ok"}')
-
-    def log_message(self, format, *args):
-        pass
-
-
-def _start_http():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
-    log.info("Health server on port %s", PORT)
-    server.serve_forever()
-
-
 def _ensure_deps():
     try:
         import dns.resolver
@@ -147,15 +128,33 @@ def _ensure_deps():
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def main():
+PORT = int(os.getenv("PORT", 8001))
+TENANT_ID = os.getenv("TENANT_ID", "sylk-conseils")
+
+
+def _safe_count(table: str, gte: str | None = None) -> int:
+    sb = get_supabase()
+    q = sb.table(table).select("*", count="exact", head=True).eq("tenant_id", TENANT_ID)
+    if gte:
+        q = q.gte("created_at", gte)
+    r = q.execute()
+    return r.count or 0
+
+
+def _safe_fetch(table: str, columns: str, gte: str | None, limit: int = 50):
+    sb = get_supabase()
+    q = sb.table(table).select(columns).eq("tenant_id", TENANT_ID)
+    if gte:
+        q = q.gte("created_at", gte)
+    q = q.order("created_at", desc=True).limit(limit)
+    r = q.execute()
+    return r.data or []
+
+
+def _cleaner_loop():
     _ensure_deps()
     log.info("Cleaner démarré — MX + SMTP handshake")
-
-    t = threading.Thread(target=_start_http, daemon=True)
-    t.start()
-
     sb = get_supabase()
-
     while True:
         try:
             processed = _process_batch(sb)
@@ -164,6 +163,116 @@ def main():
         except Exception as e:
             log.error("Erreur dans le cycle: %s", e)
             time.sleep(POLL_INTERVAL)
+
+
+# ── Dashboard Web Server ──────────────────────────────────────────────────────
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI(title="Cleaner Dashboard", docs_url=None, redoc_url=None)
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+START_TIME = time.time()
+
+
+@app.get("/api/health", include_in_schema=False)
+@app.head("/api/health", include_in_schema=False)
+async def api_health():
+    return {"status": "ok", "uptime": int(time.time() - START_TIME)}
+
+
+@app.get("/api/stats")
+async def api_stats():
+    now = datetime.now(timezone.utc)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    week = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+    cold_total = _safe_count("cold_leads")
+    cold_today = _safe_count("cold_leads", today)
+    cold_week = _safe_count("cold_leads", week)
+    cold_month = _safe_count("cold_leads", month)
+
+    clean_total = _safe_count("clean_leads")
+    clean_today = _safe_count("clean_leads", today)
+    clean_week = _safe_count("clean_leads", week)
+    clean_month = _safe_count("clean_leads", month)
+
+    usage = _safe_fetch("outscraper_usage", "places_count, contacts_count, leads_stored", None, 99999)
+    total_places = sum(r.get("places_count", 0) or 0 for r in usage)
+    total_contacts = sum(r.get("contacts_count", 0) or 0 for r in usage)
+    total_stored = sum(r.get("leads_stored", 0) or 0 for r in usage)
+
+    active = _safe_count("scrape_campaigns")
+
+    return {
+        "cold": {"total": cold_total, "today": cold_today, "week": cold_week, "month": cold_month},
+        "clean": {"total": clean_total, "today": clean_today, "week": clean_week, "month": clean_month},
+        "outscraper": {"totalPlaces": total_places, "totalContacts": total_contacts, "totalStored": total_stored, "apiCalls": len(usage)},
+        "activeCampaigns": active,
+    }
+
+
+@app.get("/api/activity")
+async def api_activity(since: str | None = None):
+    if not since:
+        since = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+
+    events = []
+
+    clean_data = _safe_fetch("clean_leads", "id, email, first_name, last_name, company_name, profession, niche, status, created_at", since, 50)
+    for r in clean_data:
+        name = f"{r.get('first_name', '') or ''} {r.get('last_name', '') or ''}".strip() or r.get("email", "")
+        events.append({
+            "id": f"clean-{r['id']}",
+            "type": "lead_cleaned",
+            "title": name,
+            "subtitle": f"{r.get('company_name', '') or ''} — {r.get('profession', '') or r.get('niche', '') or ''}",
+            "timestamp": r.get("created_at", ""),
+        })
+
+    usage_data = _safe_fetch("outscraper_usage", "id, query, location, places_count, contacts_count, leads_stored, execution_time_ms, created_at", since, 20)
+    for r in usage_data:
+        events.append({
+            "id": f"api-{r['id']}",
+            "type": "api_call",
+            "title": f"{r.get('query', '')} @ {r.get('location', '')}",
+            "subtitle": f"{r.get('places_count', 0)} places, {r.get('contacts_count', 0)} contacts, {r.get('leads_stored', 0)} stored",
+            "timestamp": r.get("created_at", ""),
+        })
+
+    campaign_data = _safe_fetch("scrape_campaigns", "id, name, keywords, status, leads_found, leads_cleaned, created_at", since, 10)
+    for r in campaign_data:
+        events.append({
+            "id": f"cmp-{r['id']}",
+            "type": "campaign",
+            "title": r.get("name", ""),
+            "subtitle": f"{r.get('leads_found', 0)} found, {r.get('leads_cleaned', 0)} cleaned — {r.get('status', '')}",
+            "timestamp": r.get("created_at", ""),
+        })
+
+    events.sort(key=lambda e: e["timestamp"], reverse=True)
+    return {"events": events[:100], "serverTime": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+async def dashboard(request: Request):
+    return templates.TemplateResponse("dashboard.html", {"request": request})
+
+
+def _start_web():
+    import uvicorn
+    log.info("Dashboard web server on port %s", PORT)
+    uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
+
+
+def main():
+    t = threading.Thread(target=_cleaner_loop, daemon=True)
+    t.start()
+    _start_web()
 
 
 if __name__ == "__main__":

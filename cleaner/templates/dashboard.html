@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cleaner Dashboard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --bg: #020617; --surface: #0f172a; --border: #1e293b; --text: #f1f5f9; --muted: #64748b; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100dvh;
+  }
+  .header {
+    position: sticky; top: 0; z-index: 40;
+    border-bottom: 1px solid var(--border);
+    background: rgba(2,6,23,0.8); backdrop-filter: blur(8px);
+  }
+  .header-inner {
+    max-width: 1280px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: linear-gradient(135deg, #06b6d4, #2563eb);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; color: #fff;
+  }
+  .header-title { font-size: 14px; font-weight: 700; color: #fff; line-height: 1.2; }
+  .header-sub { font-size: 10px; color: var(--muted); line-height: 1.2; }
+  .header-right { display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+  .status-text { font-size: 10px; color: var(--muted); }
+  .container { max-width: 1280px; margin: 0 auto; padding: 16px; }
+  .section { margin-bottom: 24px; }
+  .section-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--muted); margin-bottom: 12px;
+  }
+  .section-title svg { width: 14px; height: 14px; }
+
+  /* Stats Grid */
+  .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  @media (min-width: 1024px) { .stats-grid { grid-template-columns: repeat(4, 1fr); } }
+  .stat-card {
+    position: relative; overflow: hidden;
+    border-radius: 12px; padding: 16px;
+    backdrop-filter: blur(4px);
+  }
+  .stat-card-glow {
+    position: absolute; top: -32px; right: -32px;
+    width: 96px; height: 96px; border-radius: 50%;
+    filter: blur(48px); pointer-events: none;
+  }
+  .stat-card-content { position: relative; z-index: 10; }
+  .stat-header {
+    display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 12px;
+  }
+  .stat-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+  .stat-icon { width: 18px; height: 18px; }
+  .stat-value { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 8px; }
+  .stat-breakdown { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10px; }
+  .stat-breakdown span { color: var(--muted); }
+  .stat-breakdown strong { color: #cbd5e1; font-weight: 500; }
+
+  /* Activity Feed */
+  .activity-card {
+    border-radius: 12px; border: 1px solid rgba(30,41,59,0.4);
+    background: rgba(15,23,42,0.4); backdrop-filter: blur(4px);
+    display: flex; flex-direction: column; min-height: 400px;
+  }
+  .activity-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px; border-bottom: 1px solid rgba(30,41,59,0.4);
+  }
+  .activity-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 600; color: #e2e8f0;
+  }
+  .activity-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; animation: pulse 2s infinite; }
+  .activity-count { font-size: 10px; color: var(--muted); font-family: monospace; }
+  .activity-body { flex: 1; overflow-y: auto; padding: 8px; }
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 48px 16px; text-align: center;
+  }
+  .empty-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(30,41,59,0.5); border: 1px solid rgba(51,65,85,0.5); display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+  .empty-icon svg { width: 16px; height: 16px; color: var(--muted); }
+  .empty-title { font-size: 13px; color: #94a3b8; font-weight: 500; }
+  .empty-sub { font-size: 11px; color: #475569; margin-top: 2px; }
+
+  /* Event Item */
+  .event {
+    position: relative; overflow: hidden;
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 12px; border-radius: 8px;
+    transition: all 0.2s;
+    margin-bottom: 2px;
+  }
+  .event-new {
+    background: rgba(15,23,42,0.8); border: 1px solid rgba(30,41,59,0.5);
+  }
+  .event-old { opacity: 0.35; }
+  .event-old:hover { opacity: 0.7; }
+  .event-shimmer {
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(100,116,139,0.1), transparent);
+    transform: translateX(-100%);
+    animation: shimmer 2.5s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes shimmer { to { transform: translateX(200%); } }
+  .event-icon-wrap { position: relative; flex-shrink: 0; }
+  .event-glow {
+    position: absolute; inset: -6px; border-radius: 50%;
+    filter: blur(4px); animation: pulse-glow 2s ease-in-out infinite;
+  }
+  @keyframes pulse-glow { 0%,100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 0.8; transform: scale(1.1); } }
+  .event-icon {
+    position: relative; z-index: 10;
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .event-icon svg { width: 13px; height: 13px; }
+  .event-body { flex: 1; min-width: 0; }
+  .event-title { font-size: 12px; font-weight: 500; line-height: 1.3; }
+  .event-sub { font-size: 10px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .event-time { font-size: 10px; color: #475569; flex-shrink: 0; font-family: monospace; }
+  .loading-pulse { display: none; text-align: center; padding: 8px; }
+  .loading-pulse.active { display: block; }
+  .loading-dot { width: 6px; height: 6px; border-radius: 50%; background: #475569; display: inline-block; animation: ping 1.5s infinite; }
+  @keyframes ping { 0% { opacity: 1; } 50% { opacity: 0.2; } 100% { opacity: 1; } }
+
+  /* Skeleton */
+  .skeleton-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  @media (min-width: 1024px) { .skeleton-grid { grid-template-columns: repeat(4, 1fr); } }
+  .skeleton-card { border-radius: 12px; border: 1px solid rgba(30,41,59,0.5); background: rgba(15,23,42,0.4); padding: 16px; }
+  .skeleton-line { height: 12px; border-radius: 4px; background: rgba(30,41,59,0.6); animation: shimmer-sk 1.5s infinite; }
+  .skeleton-line-lg { height: 32px; margin: 8px 0; }
+  .skeleton-line-sm { width: 60%; }
+  @keyframes shimmer-sk { 0% { opacity: .6; } 50% { opacity: 1; } 100% { opacity: .6; } }
+
+  .error-banner {
+    font-size: 11px; color: #fb7185;
+    background: rgba(244,63,94,0.1); border: 1px solid rgba(159,18,57,0.3);
+    border-radius: 8px; padding: 8px 12px; margin-bottom: 12px;
+  }
+  .error-banner.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div class="header-left">
+      <a href="/" style="text-decoration:none;display:flex;align-items:center;gap:12px;">
+        <div class="logo">C</div>
+        <div>
+          <div class="header-title">Cleaner</div>
+          <div class="header-sub">Pipeline de nettoyage</div>
+        </div>
+      </a>
+    </div>
+    <div class="header-right">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="status-dot"></div>
+        <span class="status-text">Connecté</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Stats -->
+  <div class="section" id="stats-section">
+    <div class="section-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Statistiques
+    </div>
+    <div id="stats-grid" class="skeleton-grid">
+      <div class="skeleton-card"><div class="skeleton-line"></div><div class="skeleton-line skeleton-line-lg"></div><div class="skeleton-line skeleton-line-sm"></div></div>
+      <div class="skeleton-card"><div class="skeleton-line"></div><div class="skeleton-line skeleton-line-lg"></div><div class="skeleton-line skeleton-line-sm"></div></div>
+      <div class="skeleton-card"><div class="skeleton-line"></div><div class="skeleton-line skeleton-line-lg"></div><div class="skeleton-line skeleton-line-sm"></div></div>
+      <div class="skeleton-card"><div class="skeleton-line"></div><div class="skeleton-line skeleton-line-lg"></div><div class="skeleton-line skeleton-line-sm"></div></div>
+    </div>
+  </div>
+
+  <!-- Activity -->
+  <div class="section" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+    <div class="activity-card" id="activity-card">
+      <div class="activity-header">
+        <div class="activity-title">
+          <div class="activity-dot"></div>
+          Flux temps réel
+        </div>
+        <span class="activity-count" id="event-count">0 événements</span>
+      </div>
+      <div class="activity-body" id="activity-body">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>
+          <div class="empty-title">En attente d'activité</div>
+          <div class="empty-sub">Les événements du cleaner apparaîtront ici</div>
+        </div>
+        <div id="events-container"></div>
+        <div class="loading-pulse" id="loading-pulse"><span class="loading-dot"></span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="error-banner hidden" id="error-banner"></div>
+
+<script>
+const TENANT_ID = '{{ request.query_params.get("tenant_id", "sylk-conseils") }}';
+
+// Icons as SVG strings
+const ICONS = {
+  database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+  sparkles: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 12h18M20 4l-2 2M4 20l2-2M20 20l-2-2M4 4l2 2"/><path d="M9 9l1-1 1 1-1 1zM15 15l1-1 1 1-1 1z"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+  robot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>',
+  activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+};
+
+// Card configs
+const CARDS = [
+  { key: 'cold', label: 'Leads bruts', icon: ICONS.database, color: 'from-blue-600/20 to-blue-900/10', border: 'border-blue-800/30', glow: 'rgba(59,130,246,0.15)', iconColor: '#60a5fa' },
+  { key: 'clean', label: 'Leads nettoyés', icon: ICONS.sparkles, color: 'from-emerald-600/20 to-emerald-900/10', border: 'border-emerald-800/30', glow: 'rgba(16,185,129,0.15)', iconColor: '#34d399' },
+  { key: 'outscraper', label: 'Appels API', icon: ICONS.chart, color: 'from-violet-600/20 to-violet-900/10', border: 'border-violet-800/30', glow: 'rgba(139,92,246,0.15)', iconColor: '#a78bfa' },
+  { key: 'activeCampaigns', label: 'Campagnes actives', icon: ICONS.play, color: 'from-amber-600/20 to-amber-900/10', border: 'border-amber-800/30', glow: 'rgba(245,158,11,0.15)', iconColor: '#fbbf24' },
+];
+
+// Event type configs
+const EVENT_TYPES = {
+  lead_cleaned: { icon: ICONS.sparkles, bg: 'linear-gradient(135deg, #059669, rgba(16,185,129,0.2))', shadow: 'rgba(16,185,129,0.25)', iconColor: '#6ee7b7', glow: 'rgba(16,185,129,0.2)', titleColor: '#34d399', labelColor: '#64748b' },
+  api_call: { icon: ICONS.chart, bg: 'linear-gradient(135deg, #7c3aed, rgba(139,92,246,0.2))', shadow: 'rgba(139,92,246,0.25)', iconColor: '#c4b5fd', glow: 'rgba(139,92,246,0.2)', titleColor: '#a78bfa', labelColor: '#64748b' },
+  campaign: { icon: ICONS.robot, bg: 'linear-gradient(135deg, #d97706, rgba(245,158,11,0.2))', shadow: 'rgba(245,158,11,0.25)', iconColor: '#fde68a', glow: 'rgba(245,158,11,0.2)', titleColor: '#fbbf24', labelColor: '#64748b' },
+};
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Paris' });
+}
+
+function formatNumber(n) {
+  return Number(n).toLocaleString('fr-FR');
+}
+
+// ── Stats ──
+let statsData = null;
+
+async function fetchStats() {
+  try {
+    const r = await fetch(`/api/stats?tenant_id=${TENANT_ID}`);
+    if (!r.ok) throw new Error('Stats fetch failed');
+    statsData = await r.json();
+    renderStats(statsData);
+  } catch (e) {
+    showError('Erreur chargement stats: ' + e.message);
+  }
+}
+
+function renderStats(data) {
+  const grid = document.getElementById('stats-grid');
+  grid.className = 'stats-grid';
+  grid.innerHTML = '';
+
+  for (const card of CARDS) {
+    let value = 0;
+    let breakdown = [];
+
+    if (card.key === 'cold' || card.key === 'clean') {
+      const d = data[card.key];
+      if (d) { value = d.total; breakdown = [['Aujourd\'hui', d.today], ['Cette semaine', d.week], ['Ce mois', d.month]]; }
+    } else if (card.key === 'outscraper') {
+      if (data.outscraper) { value = data.outscraper.apiCalls; breakdown = [['Places', data.outscraper.totalPlaces], ['Contacts', data.outscraper.totalContacts], ['Stockés', data.outscraper.totalStored]]; }
+    } else if (card.key === 'activeCampaigns') {
+      value = data.activeCampaigns ?? 0;
+    }
+
+    const el = document.createElement('div');
+    el.className = `stat-card ${card.color} ${card.border}`;
+    el.style.background = `linear-gradient(135deg, ${card.color.split(' ')[0]}, ${card.color.split(' ')[2] || 'transparent'})`;
+    el.innerHTML = `
+      <div class="stat-card-glow" style="background:${card.glow}"></div>
+      <div class="stat-card-content">
+        <div class="stat-header">
+          <span class="stat-label" style="color:${card.iconColor}">${card.label}</span>
+          <span class="stat-icon" style="color:${card.iconColor}">${card.icon}</span>
+        </div>
+        <div class="stat-value">${formatNumber(value)}</div>
+        ${breakdown.length ? `<div class="stat-breakdown">${breakdown.map(([l, v]) => `<span>${l} <strong>${formatNumber(v)}</strong></span>`).join('')}</div>` : ''}
+      </div>
+    `;
+    grid.appendChild(el);
+  }
+}
+
+// ── Activity ──
+let events = [];
+let activityError = null;
+let fetchingActivity = false;
+let lastFetch = 0;
+
+async function fetchActivity() {
+  const now = Date.now();
+  if (fetchingActivity || now - lastFetch < 1000) return;
+  fetchingActivity = true;
+
+  try {
+    const since = events.length > 0
+      ? new Date(new Date(events[0].timestamp).getTime() - 1000).toISOString()
+      : undefined;
+    const params = new URLSearchParams({ tenant_id: TENANT_ID });
+    if (since) params.set('since', since);
+
+    const r = await fetch(`/api/activity?${params}`);
+    if (!r.ok) throw new Error('Activity fetch failed');
+    const json = await r.json();
+
+    const existing = new Set(events.map(e => e.id));
+    const newEvents = (json.events || []).filter(e => !existing.has(e.id));
+    events = [...newEvents, ...events].slice(0, 200);
+
+    renderActivity();
+    lastFetch = Date.now();
+  } catch (e) {
+    activityError = e.message;
+  } finally {
+    fetchingActivity = false;
+  }
+}
+
+function renderActivity() {
+  const container = document.getElementById('events-container');
+  const emptyState = document.getElementById('empty-state');
+  const countEl = document.getElementById('event-count');
+
+  countEl.textContent = `${events.length} événement${events.length > 1 ? 's' : ''}`;
+
+  if (events.length === 0) {
+    emptyState.style.display = 'flex';
+    container.innerHTML = '';
+    return;
+  }
+  emptyState.style.display = 'none';
+
+  container.innerHTML = events.map((ev, i) => {
+    const cfg = EVENT_TYPES[ev.type] || EVENT_TYPES.lead_cleaned;
+    const isNew = i < 5;
+    const cls = isNew ? 'event event-new' : 'event event-old';
+    const shimmer = isNew ? '<div class="event-shimmer"></div>' : '';
+
+    let glowHtml = '';
+    if (isNew) {
+      glowHtml = `<div class="event-glow" style="background:${cfg.glow}"></div>`;
+    }
+
+    return `<div class="${cls}" style="${isNew ? '' : ''}">
+      ${shimmer}
+      <div class="event-icon-wrap">
+        ${glowHtml}
+        <div class="event-icon" style="background:${cfg.bg};box-shadow:0 0 8px ${cfg.shadow}">
+          <span style="color:${cfg.iconColor}">${cfg.icon}</span>
+        </div>
+      </div>
+      <div class="event-body">
+        <div class="event-title" style="color:${isNew ? cfg.titleColor : '#94a3b8'}">${escHtml(ev.title)}</div>
+        <div class="event-sub" style="color:${cfg.labelColor}">${escHtml(ev.subtitle)}</div>
+      </div>
+      <span class="event-time">${formatTime(ev.timestamp)}</span>
+    </div>`;
+  }).join('');
+}
+
+function escHtml(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function showError(msg) {
+  const banner = document.getElementById('error-banner');
+  banner.textContent = msg;
+  banner.classList.remove('hidden');
+}
+
+// ── Init ──
+fetchStats();
+fetchActivity();
+setInterval(fetchActivity, 2000);
+</script>
+</body>
+</html>
