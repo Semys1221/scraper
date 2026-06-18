@@ -249,8 +249,8 @@ def _get_web_app():
         return HTMLResponse(html.read_text(encoding="utf-8"))
 
     _web_app = app
-    _web_templates = templates
-    return app, templates
+    _web_templates = None
+    return app, _web_templates
 
 
 def _start_web():
