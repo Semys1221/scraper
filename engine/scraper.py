@@ -125,23 +125,8 @@ def get_api_logs(limit: int = 100):
 
 
 # --- Helpers ---
-def _parse_keywords(text: str | None) -> list[str]:
-    return [kw.strip().lower() for kw in text.split(",") if kw.strip()] if text else []
-
-
-def _matches_keywords(company_name: str, email: str, include: list[str], exclude: list[str]) -> bool:
-    if not include and not exclude:
-        return True
-    text = f"{company_name} {email}".lower()
-    if include and not any(kw in text for kw in include):
-        return False
-    if exclude and any(kw in text for kw in exclude):
-        return False
-    return True
-
-
 # --- Scraping ---
-def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
+def _scrape_city(sb, niche, city, queue_id):
     _update_status(niche, current_city=city)
     print(f"[ENGINE] \u25b6 {niche} / {city}")
     sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
@@ -166,16 +151,12 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
 
     _log_api(niche, city, "response", f"{len(items)} r\u00e9sultats bruts")
     inserted = 0
-    total_filtered = 0
     for entry in items:
         place_id = str(entry.get("place_id", entry.get("id", str(uuid.uuid4()))))
         email = (entry.get("email") or entry.get("email_1") or "").lower().strip()
         if not email:
             continue
         company_name = entry.get("name") or entry.get("company_name", "") or ""
-        if not _matches_keywords(company_name, email, include_kw, exclude_kw):
-            total_filtered += 1
-            continue
         first_name = ""
         local = email.split("@")[0]
         for sep in [".", "-", "_"]:
@@ -198,7 +179,7 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
             if "duplicate" not in err and "23505" not in err:
                 print(f"[ENGINE] \u26a0 Upsert {email}: {e}")
 
-    print(f"[ENGINE]   +{inserted} leads ({niche}/{city}) filtr\u00e9s={total_filtered}")
+    print(f"[ENGINE]   +{inserted} leads ({niche}/{city})")
     for m in MILESTONES:
         if m <= inserted:
             send_discord(f"[MILESTONE] **{niche}/{city}** : {m} leads !")
@@ -214,11 +195,6 @@ def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
         print(f"[ENGINE] \u23ed Aucune campagne pending pour '{niche}'")
         return 0
 
-    include_kw = _parse_keywords(cities.data[0].get("include_keywords"))
-    exclude_kw = _parse_keywords(cities.data[0].get("exclude_keywords"))
-    if include_kw or exclude_kw:
-        print(f"[ENGINE] Filtres {niche}: include={include_kw}, exclude={exclude_kw}")
-
     _update_status(niche, cities_total=len(cities.data))
     total, nb_cities = 0, len(cities.data)
     print(f"[ENGINE] \U0001f3c1 {niche}: {nb_cities} villes, target {target} leads")
@@ -231,7 +207,7 @@ def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
             if _scrape_status.get(niche, {}).get("status") == "stopping":
                 print(f"[ENGINE] \U0001f6d1 '{niche}' arr\u00eat\u00e9")
                 break
-        inserted = _scrape_city(sb, niche, camp["city"], camp["id"], include_kw, exclude_kw)
+        inserted = _scrape_city(sb, niche, camp["city"], camp["id"])
         total += inserted
         _update_status(niche, total=total, cities_done=idx)
         print(f"[ENGINE] \U0001f4c8 {niche}: {total}/{target} leads ({idx}/{nb_cities} villes)")
