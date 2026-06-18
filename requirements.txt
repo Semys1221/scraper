@@ -1,2 +1,3 @@
 -r engine/requirements.txt
 -r cleaner/requirements.txt
+outscraper

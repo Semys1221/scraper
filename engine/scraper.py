@@ -3,16 +3,15 @@ from collections import deque
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-import requests
-from database.config import get_supabase, OUTSCRAPER_API_KEY, OUTSCRAPER_API_BASE, send_discord
+from outscraper import OutscraperClient
+from database.config import get_supabase, OUTSCRAPER_API_KEY, send_discord
 
-QUERY_LIMIT = 500
 LOG_FREQUENCY = 50
 MILESTONES = [100, 500, 1000, 2000, 5000]
 TARGET_PER_NICHE = 20_000
 RETRY_DELAY = 10
 
-OUTSCRAPER_URL = f"{OUTSCRAPER_API_BASE}/maps/search"
+_client = OutscraperClient(api_key=OUTSCRAPER_API_KEY)
 
 # --- Job queue ---
 _scrape_queue = queue.Queue()
@@ -147,53 +146,25 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
     print(f"[ENGINE] \u25b6 {niche} / {city}")
     sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
 
-    query = f"{niche} {city}"
-    params = {"query": query, "limit": QUERY_LIMIT, "language": "fr", "enrichment": "contacts_n_leads", "async": "true"}
-    _log_api(niche, city, "request", f"query={query}")
-
     try:
-        resp = requests.get(OUTSCRAPER_URL, params=params, headers={"X-API-KEY": OUTSCRAPER_API_KEY}, timeout=30)
-    except requests.RequestException as e:
-        _log_api(niche, city, "error", f"R\u00e9seau: {e}")
+        results = _client.google_maps_search(
+            f"{niche} {city}",
+            limit=500,
+            language="fr",
+            enrichment="contacts_n_leads",
+        )
+    except Exception as e:
+        print(f"[ENGINE] \u26a0 SDK error {niche}/{city}: {e}")
         sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
         return 0
 
-    if resp.status_code == 429:
-        _log_api(niche, city, "rate_limit", "429")
-        sb.table("campaign_queue").update({"status": "pending"}).eq("id", queue_id).execute()
-        return -1
-
-    if resp.status_code not in (200, 202):
-        _log_api(niche, city, "error", f"HTTP {resp.status_code}")
-        sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-        return 0
-
-    data = resp.json()
-    request_id = data.get("id")
-    if data.get("status") == "Pending" and request_id:
-        _log_api(niche, city, "pending", f"polling request {request_id}")
-        for _ in range(36):
-            time.sleep(5)
-            poll = requests.get(f"{OUTSCRAPER_URL.replace('/maps/search', '/requests/' + request_id)}", timeout=30)
-            if poll.status_code != 200:
-                continue
-            poll_data = poll.json()
-            if poll_data.get("status") in ("Completed", "Success", None):
-                data = poll_data
-                break
-        else:
-            _log_api(niche, city, "error", "Timeout polling results")
-            sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-            return 0
-
-    items = data.get("data", [])
-    if items and isinstance(items, list) and len(items) > 0 and isinstance(items[0], list):
-        items = items[0]
+    items = results[0] if results else []
     if not items:
         _log_api(niche, city, "done", "0 r\u00e9sultats")
         sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
         return 0
 
+    _log_api(niche, city, "response", f"{len(items)} r\u00e9sultats bruts")
     inserted = 0
     total_filtered = 0
     for entry in items:
@@ -219,17 +190,12 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
             if "duplicate" not in err and "23505" not in err:
                 print(f"[ENGINE] \u26a0 Upsert {email}: {e}")
 
-    _log_api(niche, city, "response", f"+{inserted} leads")
-    print(f"[ENGINE]   +{inserted} leads ({niche}/{city})")
-
+    print(f"[ENGINE]   +{inserted} leads ({niche}/{city}) filtr\u00e9s={total_filtered}")
     for m in MILESTONES:
-        prev = inserted - len(items) + len([e for e in items if e.get("email")])
-        if prev < m <= inserted:
+        if m <= inserted:
             send_discord(f"[MILESTONE] **{niche}/{city}** : {m} leads !")
 
     sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-    _log_api(niche, city, "done", f"{inserted} leads, {total_filtered} filtr\u00e9s")
-    print(f"[ENGINE] \u2705 {niche} / {city} termin\u00e9e ({inserted} leads, {total_filtered} filtr\u00e9s)")
     return inserted
 
 
