@@ -22,6 +22,7 @@ BATCH_SIZE = 100
 LOG_FREQUENCY = 50
 MILESTONES = [100, 500, 1000, 2000, 5000]
 TARGET_PER_NICHE = 20_000
+MAX_PER_CITY = 500
 RETRY_DELAY = 10
 MAX_CONCURRENT = 3
 
@@ -187,6 +188,9 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
     skip = 0
 
     while True:
+        if total_inserted >= MAX_PER_CITY:
+            print(f"[ENGINE] 🛑 Cap {MAX_PER_CITY} atteint pour {niche}/{city}")
+            break
         query = f"{niche} {city}"
         params = {
             "query": query,

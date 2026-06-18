@@ -77,15 +77,6 @@ def _process_batch(sb):
         email = lead["email"]
         place_id = lead["place_id"]
 
-        if _is_generic(email):
-            sb.table("leads").update({
-                "status": "cleaned",
-                "valid": False,
-            }).eq("place_id", place_id).execute()
-            cleaned_invalid += 1
-            processed += 1
-            continue
-
         first_name = _extract_first_name(email)
         domain = email.split("@")[1] if "@" in email else ""
         is_valid = _verify_email(email)
@@ -179,12 +170,10 @@ def _get_web_app():
     if _web_app is not None:
         return _web_app, _web_templates
 
-    from fastapi import FastAPI, Request
+    from fastapi import FastAPI
     from fastapi.responses import HTMLResponse
-    from fastapi.templating import Jinja2Templates
 
     app = FastAPI(title="Cleaner Dashboard", docs_url=None, redoc_url=None)
-    templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
     _WEB_START_TIME = time.time()
 
     @app.get("/health", include_in_schema=False)
@@ -255,8 +244,9 @@ def _get_web_app():
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     @app.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
-    async def dashboard(request: Request):
-        return templates.TemplateResponse("dashboard.html", {"request": request})
+    async def dashboard():
+        html = Path(__file__).parent / "templates" / "dashboard.html"
+        return HTMLResponse(html.read_text(encoding="utf-8"))
 
     _web_app = app
     _web_templates = templates
