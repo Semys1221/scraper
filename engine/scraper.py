@@ -148,86 +148,89 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
     sb.table("campaign_queue").update({"status": "scraping"}).eq("id", queue_id).execute()
 
     query = f"{niche} {city}"
-    params = {"query": query, "limit": QUERY_LIMIT, "language": "fr", "enrichment": "contacts_n_leads", "async": "false"}
+    params = {"query": query, "limit": QUERY_LIMIT, "language": "fr", "enrichment": "contacts_n_leads", "async": "true"}
     _log_api(niche, city, "request", f"query={query}")
 
-    for attempt in range(3):
-        try:
-            resp = requests.get(OUTSCRAPER_URL, params=params, headers={"X-API-KEY": OUTSCRAPER_API_KEY}, timeout=120)
-        except requests.RequestException as e:
-            _log_api(niche, city, "error", f"R\u00e9seau: {e}")
-            time.sleep(RETRY_DELAY)
-            continue
-
-        if resp.status_code == 429:
-            _log_api(niche, city, "rate_limit", "429")
-            time.sleep(RETRY_DELAY)
-            continue
-
-        if resp.status_code == 404:
-            _log_api(niche, city, "done", "404 \u2014 aucun r\u00e9sultat")
-            sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-            return 0
-
-        if resp.status_code == 202:
-            _log_api(niche, city, "pending", "Async response avec async=false")
-            sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-            return 0
-
-        if resp.status_code != 200:
-            _log_api(niche, city, "error", f"HTTP {resp.status_code}")
-            time.sleep(RETRY_DELAY)
-            continue
-
-        data = resp.json()
-        items = data.get("data", [])
-        if items and isinstance(items, list) and len(items) > 0 and isinstance(items[0], list):
-            items = items[0]
-        if not items:
-            _log_api(niche, city, "done", "0 r\u00e9sultats")
-            sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-            return 0
-
-        inserted = 0
-        total_filtered = 0
-        for entry in items:
-            place_id = str(entry.get("place_id", entry.get("id", str(uuid.uuid4()))))
-            email = (entry.get("email") or entry.get("email_1") or "").lower().strip()
-            if not email:
-                continue
-            company_name = entry.get("name") or entry.get("company_name", "") or ""
-            if not _matches_keywords(company_name, email, include_kw, exclude_kw):
-                total_filtered += 1
-                continue
-            lead = {
-                "place_id": place_id, "campaign_queue_id": queue_id, "email": email,
-                "company_name": company_name, "phone": entry.get("phone", ""),
-                "location": entry.get("full_address") or entry.get("location", ""),
-                "niche": niche, "city": city, "status": "raw", "metadata": {},
-            }
-            try:
-                sb.table("leads").upsert(lead, on_conflict="place_id").execute()
-                inserted += 1
-            except Exception as e:
-                err = str(e).lower()
-                if "duplicate" not in err and "23505" not in err:
-                    print(f"[ENGINE] \u26a0 Upsert {email}: {e}")
-
-        _log_api(niche, city, "response", f"+{inserted} leads")
-        print(f"[ENGINE]   +{inserted} leads ({niche}/{city})")
-
-        for m in MILESTONES:
-            prev = inserted - len(items) + len([e for e in items if e.get("email")])
-            if prev < m <= inserted:
-                send_discord(f"[MILESTONE] **{niche}/{city}** : {m} leads !")
-
+    try:
+        resp = requests.get(OUTSCRAPER_URL, params=params, headers={"X-API-KEY": OUTSCRAPER_API_KEY}, timeout=30)
+    except requests.RequestException as e:
+        _log_api(niche, city, "error", f"R\u00e9seau: {e}")
         sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-        _log_api(niche, city, "done", f"{inserted} leads, {total_filtered} filtr\u00e9s")
-        print(f"[ENGINE] \u2705 {niche} / {city} termin\u00e9e ({inserted} leads, {total_filtered} filtr\u00e9s)")
-        return inserted
+        return 0
+
+    if resp.status_code == 429:
+        _log_api(niche, city, "rate_limit", "429")
+        sb.table("campaign_queue").update({"status": "pending"}).eq("id", queue_id).execute()
+        return -1
+
+    if resp.status_code not in (200, 202):
+        _log_api(niche, city, "error", f"HTTP {resp.status_code}")
+        sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
+        return 0
+
+    data = resp.json()
+    request_id = data.get("id")
+    if data.get("status") == "Pending" and request_id:
+        _log_api(niche, city, "pending", f"polling request {request_id}")
+        for _ in range(36):
+            time.sleep(5)
+            poll = requests.get(f"{OUTSCRAPER_URL.replace('/maps/search', '/requests/' + request_id)}", timeout=30)
+            if poll.status_code != 200:
+                continue
+            poll_data = poll.json()
+            if poll_data.get("status") in ("Completed", "Success", None):
+                data = poll_data
+                break
+        else:
+            _log_api(niche, city, "error", "Timeout polling results")
+            sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
+            return 0
+
+    items = data.get("data", [])
+    if items and isinstance(items, list) and len(items) > 0 and isinstance(items[0], list):
+        items = items[0]
+    if not items:
+        _log_api(niche, city, "done", "0 r\u00e9sultats")
+        sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
+        return 0
+
+    inserted = 0
+    total_filtered = 0
+    for entry in items:
+        place_id = str(entry.get("place_id", entry.get("id", str(uuid.uuid4()))))
+        email = (entry.get("email") or entry.get("email_1") or "").lower().strip()
+        if not email:
+            continue
+        company_name = entry.get("name") or entry.get("company_name", "") or ""
+        if not _matches_keywords(company_name, email, include_kw, exclude_kw):
+            total_filtered += 1
+            continue
+        lead = {
+            "place_id": place_id, "campaign_queue_id": queue_id, "email": email,
+            "company_name": company_name, "phone": entry.get("phone", ""),
+            "location": entry.get("full_address") or entry.get("location", ""),
+            "niche": niche, "city": city, "status": "raw", "metadata": {},
+        }
+        try:
+            sb.table("leads").upsert(lead, on_conflict="place_id").execute()
+            inserted += 1
+        except Exception as e:
+            err = str(e).lower()
+            if "duplicate" not in err and "23505" not in err:
+                print(f"[ENGINE] \u26a0 Upsert {email}: {e}")
+
+    _log_api(niche, city, "response", f"+{inserted} leads")
+    print(f"[ENGINE]   +{inserted} leads ({niche}/{city})")
+
+    for m in MILESTONES:
+        prev = inserted - len(items) + len([e for e in items if e.get("email")])
+        if prev < m <= inserted:
+            send_discord(f"[MILESTONE] **{niche}/{city}** : {m} leads !")
 
     sb.table("campaign_queue").update({"status": "done"}).eq("id", queue_id).execute()
-    return 0
+    _log_api(niche, city, "done", f"{inserted} leads, {total_filtered} filtr\u00e9s")
+    print(f"[ENGINE] \u2705 {niche} / {city} termin\u00e9e ({inserted} leads, {total_filtered} filtr\u00e9s)")
+    return inserted
 
 
 def _scrape_niche(niche: str, target: int = TARGET_PER_NICHE):
