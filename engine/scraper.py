@@ -176,11 +176,19 @@ def _scrape_city(sb, niche, city, queue_id, include_kw, exclude_kw):
         if not _matches_keywords(company_name, email, include_kw, exclude_kw):
             total_filtered += 1
             continue
+        first_name = ""
+        local = email.split("@")[0]
+        for sep in [".", "-", "_"]:
+            if sep in local:
+                first_name = local.split(sep)[0].strip().capitalize()
+                break
         lead = {
             "place_id": place_id, "campaign_queue_id": queue_id, "email": email,
             "company_name": company_name, "phone": entry.get("phone", ""),
             "location": entry.get("full_address") or entry.get("location", ""),
-            "niche": niche, "city": city, "status": "raw", "metadata": {},
+            "niche": niche, "city": city,
+            "status": "cleaned", "valid": True, "first_name": first_name, "domain": email.split("@")[1] if "@" in email else "",
+            "metadata": {},
         }
         try:
             sb.table("leads").upsert(lead, on_conflict="place_id").execute()
